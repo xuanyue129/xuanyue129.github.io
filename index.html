@@ -3,34 +3,219 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>xuan 的专属站点</title>
+    <title>xuan 的二次元小站</title>
     <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            height: 100vh;
+        * {
             margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            height: 100vh;
+            overflow: hidden;
+            background-color: #1a1a2e;
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+            transition: background-image 0.5s ease-in-out;
             display: flex;
             justify-content: center;
             align-items: center;
             color: white;
             text-align: center;
         }
-        .container {
+
+        /* 半透明磨砂玻璃容器 */
+        .glass-container {
             background: rgba(255, 255, 255, 0.1);
-            padding: 40px;
-            border-radius: 15px;
-            backdrop-filter: blur(10px);
-            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 50px 60px;
+            border-radius: 24px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            animation: fadeIn 1.5s ease-out;
+            position: relative;
+            z-index: 10;
         }
-        h1 { margin-bottom: 10px; }
-        p { font-size: 1.2em; opacity: 0.9; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 12px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        p {
+            font-size: 1.1rem;
+            opacity: 0.85;
+            letter-spacing: 1px;
+        }
+
+        /* 用于鼠标拖尾和点击特效的 Canvas */
+        #fx-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* 让 Canvas 不阻挡鼠标事件 */
+            z-index: 9999;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>你好，欢迎来到 xuan 的主页！</h1>
-        <p>这是我的第一个个人网站，成功上线啦！🚀</p>
+
+    <div class="glass-container">
+        <h1>你好，欢迎来到 xuan 的二次元小站 ✨</h1>
+        <p>每次刷新，都有不一样的风景</p>
     </div>
+
+    <!-- 特效画布 -->
+    <canvas id="fx-canvas"></canvas>
+
+    <script>
+        // ============================================================
+        // 1. 随机二次元壁纸（调用 gmya.net 接口）
+        // ============================================================
+        const APPKEY = '905e6cc1dc935cacd51f5e6501906951';
+        // 故梦吖「随机二次元壁纸」接口，拼接 APPKEY 进行调用
+        const API_URL = `https://www.gmya.net/Api/DmImg?appkey=${APPKEY}`;
+
+        function loadRandomAnimeBackground() {
+            // 创建一个临时图片对象来预加载，加载成功后再设为背景，避免出现白屏闪烁
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = function() {
+                document.body.style.backgroundImage = `url('${img.src}')`;
+            };
+            img.onerror = function() {
+                // 如果接口调用失败，使用一张备用图片
+                console.warn('API 图片加载失败，使用备用背景。');
+                document.body.style.backgroundImage = 'url("https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=2000&auto=format&fit=crop")';
+            };
+            // 添加时间戳防止浏览器缓存，确保每次刷新都是新图
+            img.src = API_URL + '&t=' + Date.now();
+        }
+
+        // 页面加载时调用一次
+        loadRandomAnimeBackground();
+
+
+        // ============================================================
+        // 2. 鼠标拖尾 & 点击透明波纹特效（基于 Canvas）
+        // ============================================================
+        const canvas = document.getElementById('fx-canvas');
+        const ctx = canvas.getContext('2d');
+
+        let width, height;
+        let particles = []; // 拖尾粒子数组
+        let ripples = [];   // 点击波纹数组
+
+        function resizeCanvas() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // --- 鼠标拖尾粒子 ---
+        let lastMouseTime = 0;
+        window.addEventListener('mousemove', (e) => {
+            const now = Date.now();
+            // 限制生成频率，避免粒子过多导致卡顿（约每 30ms 生成一个）
+            if (now - lastMouseTime < 30) return;
+            lastMouseTime = now;
+
+            particles.push({
+                x: e.clientX,
+                y: e.clientY,
+                radius: Math.random() * 3 + 1.5, // 粒子半径 1.5 ~ 4.5
+                alpha: 1,
+                decay: Math.random() * 0.02 + 0.015, // 消失速度
+                vx: (Math.random() - 0.5) * 1.2,     // 水平漂移
+                vy: (Math.random() - 0.5) * 1.2      // 垂直漂移
+            });
+        });
+
+        // --- 点击透明波纹 ---
+        window.addEventListener('click', (e) => {
+            // 一次点击生成 2 个错开的波纹，增强层次感
+            for (let i = 0; i < 2; i++) {
+                ripples.push({
+                    x: e.clientX,
+                    y: e.clientY,
+                    radius: 0,
+                    maxRadius: Math.random() * 40 + 60, // 最大半径 60 ~ 100
+                    alpha: 0.6,
+                    lineWidth: 2,
+                    speed: Math.random() * 2 + 2,
+                    delay: i * 8 // 第二个波纹稍微延迟一点出现
+                });
+            }
+        });
+
+        // --- 动画循环 ---
+        function animate() {
+            ctx.clearRect(0, 0, width, height);
+
+            // 1. 绘制并更新鼠标拖尾粒子
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.alpha -= p.decay;
+
+                if (p.alpha <= 0) {
+                    particles.splice(i, 1);
+                    continue;
+                }
+
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                // 使用淡蓝色/紫色系的拖尾，契合二次元氛围
+                ctx.fillStyle = `rgba(180, 220, 255, ${p.alpha})`;
+                ctx.fill();
+            }
+
+            // 2. 绘制并更新点击波纹
+            for (let i = ripples.length - 1; i >= 0; i--) {
+                const r = ripples[i];
+
+                if (r.delay > 0) {
+                    r.delay--;
+                    continue;
+                }
+
+                r.radius += r.speed;
+                r.alpha -= 0.015; // 扩散过程中逐渐透明
+
+                if (r.radius >= r.maxRadius || r.alpha <= 0) {
+                    ripples.splice(i, 1);
+                    continue;
+                }
+
+                ctx.beginPath();
+                ctx.arc(r.x, r.y, r.radius, 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(255, 255, 255, ${r.alpha})`;
+                ctx.lineWidth = r.lineWidth;
+                ctx.stroke();
+            }
+
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+
 </body>
 </html>
