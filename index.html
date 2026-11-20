@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#07111F">
-  <meta name="description" content="幻想割草：元素幸存者——一款幻想风格的浏览器增量生存游戏。">
+  <meta name="description" content="幻想割草：元素幸存者——幻想风格的浏览器增量生存游戏。">
   <title>幻想割草：元素幸存者</title>
   <link rel="stylesheet" href="./styles.css">
   <script defer src="./js/save.js"></script>
@@ -58,39 +58,46 @@
               <span>关于我</span><span class="button-glyph" aria-hidden="true">↗</span>
             </a>
           </div>
-          <p class="menu-hint">选择元素，开启你的生存试炼</p>
+          <p class="menu-hint">WASD / 方向键移动 · 自动攻击最近的敌人</p>
         </div>
       </section>
 
-      <section id="gameScreen" class="game-screen screen" hidden aria-label="游戏演示场景">
+      <section id="gameScreen" class="game-screen screen" hidden aria-label="游戏战斗场景">
         <div class="hud hud-top">
           <div class="hud-group hud-vitals">
             <div class="hud-stat"><span class="hud-label">生命</span><strong id="hudHealth">100 / 100</strong></div>
             <div class="meter meter-health"><span id="healthFill" style="width:100%"></span></div>
-            <div class="hud-stat hud-exp-stat"><span class="hud-label">经验</span><strong id="hudLevel">Lv. 1</strong></div>
+            <div class="hud-stat hud-exp-stat"><span class="hud-label">等级 <b id="hudLevel">1</b></span><strong id="hudExpText">0 / 20</strong></div>
             <div class="meter meter-exp"><span id="expFill" style="width:0%"></span></div>
           </div>
           <div class="hud-group hud-summary">
-            <div class="hud-chip"><span>✧</span><strong id="hudGold">0</strong><small>金币</small></div>
+            <div class="hud-chip"><span>✧</span><strong id="hudGold">0</strong><small>本局金币</small></div>
             <div class="hud-chip"><strong id="hudWave">01</strong><small>波次</small></div>
             <div class="hud-chip"><strong id="hudKills">0</strong><small>击杀</small></div>
+            <div class="hud-chip hud-time-chip"><strong id="hudTime">00:00</strong><small>生存时间</small></div>
             <button class="icon-button pause-button" type="button" data-action="pause" aria-label="暂停游戏">Ⅱ</button>
           </div>
         </div>
 
         <div class="arena-frame">
-          <canvas id="gameCanvas" class="game-canvas" aria-label="幻想竞技场演示画面"></canvas>
-          <div class="arena-caption"><span class="live-dot"></span> 场景预览 · 战斗系统将在后续阶段接入</div>
-          <div class="arena-center-note">
-            <span class="note-sigil">✧</span>
-            <strong id="arenaElementName">尚未选择元素</strong>
-            <small>当前为可交互画布骨架，暂无敌人和攻击判定</small>
-          </div>
+          <canvas id="gameCanvas" class="game-canvas" aria-label="幻想竞技场战斗画面"></canvas>
+          <div class="arena-caption"><span class="live-dot"></span> 生存试炼 · 自动攻击已启用</div>
+          <div class="arena-help">W A S D / 方向键移动</div>
         </div>
+
         <div class="hud hud-bottom">
-          <div class="element-indicator"><span id="hudElementIcon">✧</span><div><small>当前元素</small><strong id="hudElement">未选择</strong></div></div>
-          <div class="reaction-hint"><small>元素反应提示</small><strong>等待元素附着……</strong></div>
-          <div class="demo-controls"><span>WASD / 方向键</span><small>移动功能将在阶段 3 开放</small></div>
+          <div class="element-indicator">
+            <span id="hudElementIcon">✧</span>
+            <div><small>当前元素</small><strong id="hudElement">未选择</strong></div>
+          </div>
+          <div class="reaction-hint">
+            <small>元素反应</small>
+            <strong id="hudReaction">等待元素附着……</strong>
+          </div>
+          <div class="demo-controls">
+            <span>移动：WASD / 方向键</span>
+            <small>角色自动锁定攻击范围内最近的敌人</small>
+          </div>
         </div>
       </section>
     </main>
@@ -98,7 +105,7 @@
     <footer class="site-footer">
       <span>幻想割草：元素幸存者</span>
       <span class="footer-separator">✧</span>
-      <span>LOCAL BUILD · V0.2.0</span>
+      <span>LOCAL BUILD · V0.3.0</span>
     </footer>
   </div>
 
@@ -108,7 +115,7 @@
       <button class="modal-close" type="button" data-action="close-element" aria-label="关闭">×</button>
       <p class="eyebrow">CHOOSE YOUR ELEMENT</p>
       <h2 id="elementModalTitle">选择初始元素</h2>
-      <p class="modal-description">每种元素拥有独特的战斗倾向。现在可以预览选择，实际技能将在后续阶段实现。</p>
+      <p class="modal-description">选择你的初始元素。攻击会附着元素，连续命中不同元素可触发反应。</p>
       <div id="elementChoices" class="element-grid">
         <button class="element-choice fire" type="button" data-element="fire"><span>✹</span><strong>火</strong><small>灼烧 · 爆发</small></button>
         <button class="element-choice water" type="button" data-element="water"><span>◉</span><strong>水</strong><small>连击 · 扩散</small></button>
@@ -118,7 +125,7 @@
         <button class="element-choice geo" type="button" data-element="geo"><span>◇</span><strong>岩</strong><small>坚固 · 重击</small></button>
         <button class="element-choice anemo" type="button" data-element="anemo"><span>〰</span><strong>风</strong><small>穿透 · 击退</small></button>
       </div>
-      <p class="modal-footnote">选择后进入竞技场场景预览；本阶段不包含实际战斗。</p>
+      <p class="modal-footnote">每次开局均可重新选择元素。WASD 或方向键移动，角色自动攻击最近敌人。</p>
     </section>
   </div>
 
@@ -129,15 +136,15 @@
       <p class="eyebrow">SYSTEM SETTINGS</p>
       <h2 id="settingsTitle">游戏设置</h2>
       <div class="setting-row">
-        <div><strong>主音量</strong><small>预留音频控制接口</small></div>
+        <div><strong>主音量</strong><small>音效将在阶段 5 接入</small></div>
         <label class="range-wrap"><input id="volumeInput" type="range" min="0" max="100" step="1" value="70"><output id="volumeOutput">70%</output></label>
       </div>
       <div class="setting-row">
-        <div><strong>粒子特效</strong><small>控制背景和后续战斗粒子</small></div>
+        <div><strong>粒子特效</strong><small>控制背景与战斗粒子</small></div>
         <label class="switch"><input id="particlesInput" type="checkbox" checked><span></span></label>
       </div>
       <div class="setting-row">
-        <div><strong>屏幕震动</strong><small>后续战斗反馈预留选项</small></div>
+        <div><strong>屏幕震动</strong><small>受击时的画面反馈</small></div>
         <label class="switch"><input id="shakeInput" type="checkbox" checked><span></span></label>
       </div>
       <div class="settings-actions">
@@ -152,9 +159,32 @@
     <section class="modal-panel pause-modal" role="dialog" aria-modal="true" aria-labelledby="pauseTitle">
       <p class="eyebrow">JOURNEY PAUSED</p>
       <h2 id="pauseTitle">旅途暂歇</h2>
-      <p class="modal-description">这是阶段 2 的场景骨架。战斗循环将在后续阶段接入。</p>
-      <button class="menu-button menu-button-primary" type="button" data-action="resume">继续预览</button>
-      <button class="menu-button" type="button" data-action="quit">返回主菜单</button>
+      <p class="modal-description">战斗已暂停。继续试炼，或结束本局返回主菜单。</p>
+      <button class="menu-button menu-button-primary" type="button" data-action="resume">继续战斗</button>
+      <button class="menu-button" type="button" data-action="quit">放弃本局并返回</button>
+    </section>
+  </div>
+
+  <!-- 死亡结算弹窗 -->
+  <div id="settlementModal" class="modal-backdrop" hidden>
+    <section class="modal-panel settlement-modal" role="dialog" aria-modal="true" aria-labelledby="settlementTitle">
+      <p class="eyebrow">TRIAL COMPLETED</p>
+      <h2 id="settlementTitle">试炼结束</h2>
+      <p class="modal-description">旅途暂告一段落。收获已计入本地记录。</p>
+      <div class="settlement-grid">
+        <div class="settlement-stat"><small>生存时间</small><strong id="resultTime">00:00</strong></div>
+        <div class="settlement-stat"><small>击败敌人</small><strong id="resultKills">0</strong></div>
+        <div class="settlement-stat"><small>达到等级</small><strong id="resultLevel">1</strong></div>
+        <div class="settlement-stat"><small>本局经验</small><strong id="resultExperience">0</strong></div>
+        <div class="settlement-stat"><small>本局金币</small><strong id="resultGold">0</strong></div>
+      </div>
+      <div class="settlement-total">
+        <span>累计金币</span><strong id="resultTotalGold">0</strong>
+      </div>
+      <div class="settlement-actions">
+        <button class="menu-button menu-button-primary" type="button" data-action="retry">再次挑战</button>
+        <button class="menu-button" type="button" data-action="settlement-menu">返回主菜单</button>
+      </div>
     </section>
   </div>
 
