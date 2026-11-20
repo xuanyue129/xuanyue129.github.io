@@ -4,12 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#07111F">
-  <meta name="description" content="幻想割草：元素幸存者——幻想风格的浏览器增量生存游戏。">
-  <title>幻想割草：元素幸存者</title>
+  <meta name="description" content="米饭的自我救赎——随机升级构筑、宠物冲撞与大运反击的生存游戏。">
+  <title>米饭的自我救赎</title>
   <link rel="stylesheet" href="./styles.css">
   <script defer src="./js/save.js"></script>
   <script defer src="./js/entities.js"></script>
-  <script defer src="./js/elements.js"></script>
   <script defer src="./js/upgrades.js"></script>
   <script defer src="./js/audio.js"></script>
   <script defer src="./js/game.js"></script>
@@ -24,7 +23,7 @@
     <header class="topbar">
       <a class="brand-mark" href="./index.html" aria-label="返回游戏首页">
         <span class="brand-symbol" aria-hidden="true">✧</span>
-        <span class="brand-copy"><strong>ELEMENTAL</strong><small>SURVIVOR</small></span>
+        <span class="brand-copy"><strong>RICE</strong><small>REDEMPTION</small></span>
       </a>
       <nav class="topnav" aria-label="主导航">
         <a href="./about.html">关于我</a>
@@ -35,11 +34,11 @@
     <main>
       <section id="menuScreen" class="menu-screen screen" aria-labelledby="gameTitle">
         <div class="menu-content">
-          <p class="eyebrow">A FANTASY SURVIVAL JOURNEY</p>
+          <p class="eyebrow">A JOURNEY OF RICE'S REDEMPTION</p>
           <div class="title-ornament" aria-hidden="true"><span></span> ✧ <span></span></div>
-          <h1 id="gameTitle" class="game-title">幻想割草</h1>
-          <p class="game-subtitle">元 素 幸 存 者</p>
-          <p class="title-en">ELEMENTAL SURVIVOR</p>
+          <h1 id="gameTitle" class="game-title">米饭的自我救赎</h1>
+          <p class="game-subtitle">活 下 去 · 变 得 更 强</p>
+          <p class="title-en">RICE'S REDEMPTION</p>
 
           <div class="menu-buttons" aria-label="游戏菜单">
             <button class="menu-button menu-button-primary" type="button" data-action="start">
@@ -58,15 +57,16 @@
               <span>关于我</span><span class="button-glyph" aria-hidden="true">↗</span>
             </a>
           </div>
-          <p class="menu-hint">WASD / 方向键移动 · 自动攻击最近的敌人</p>
+          <p class="menu-hint">电脑：WASD / 方向键移动 · 手机：使用屏幕摇杆 · 自动攻击</p>
+          <p id="menuSaveSummary" class="menu-save-summary">金币 0 · 星辉碎片 0 · 全局倍率 ×1.00</p>
         </div>
       </section>
 
       <section id="gameScreen" class="game-screen screen" hidden aria-label="游戏战斗场景">
         <div class="hud hud-top">
           <div class="hud-group hud-vitals">
-            <div class="hud-stat"><span class="hud-label">生命</span><strong id="hudHealth">100 / 100</strong></div>
-            <div class="meter meter-health"><span id="healthFill" style="width:100%"></span></div>
+            <div class="hud-stat"><span class="hud-label">生命</span><strong id="hudHealth">3 / 3</strong></div>
+            <div id="hudHearts" class="heart-row" aria-label="剩余 3 颗心，共 3 颗心"><span class="heart-full">♥</span><span class="heart-full">♥</span><span class="heart-full">♥</span></div>
             <div class="hud-stat hud-exp-stat"><span class="hud-label">等级 <b id="hudLevel">1</b></span><strong id="hudExpText">0 / 20</strong></div>
             <div class="meter meter-exp"><span id="expFill" style="width:0%"></span></div>
           </div>
@@ -80,53 +80,30 @@
         </div>
 
         <div class="arena-frame">
-          <canvas id="gameCanvas" class="game-canvas" aria-label="幻想竞技场战斗画面"></canvas>
-          <div class="arena-caption"><span class="live-dot"></span> 生存试炼 · 自动攻击已启用</div>
-          <div class="arena-help">W A S D / 方向键移动</div>
+          <canvas id="gameCanvas" class="game-canvas" aria-label="米饭的自我救赎战斗画面"></canvas>
+          <div id="moveJoystick" class="mobile-joystick" role="group" aria-label="触控移动摇杆">
+            <span class="joystick-ring" aria-hidden="true"></span>
+            <span id="joystickKnob" class="joystick-knob" aria-hidden="true"></span>
+          </div>
+          <div class="arena-caption"><span class="live-dot"></span> 生存试炼 · 自动射击已启用</div>
+          <div class="arena-help">W A S D / 方向键 · 手机使用左下摇杆</div>
         </div>
 
         <div class="hud hud-bottom">
-          <div class="element-indicator">
-            <span id="hudElementIcon">✧</span>
-            <div><small>当前元素</small><strong id="hudElement">未选择</strong></div>
-          </div>
-          <div class="reaction-hint">
-            <small>元素反应</small>
-            <strong id="hudReaction">等待元素附着……</strong>
-          </div>
           <div class="demo-controls">
             <span>移动：WASD / 方向键</span>
-            <small>角色自动锁定攻击范围内最近的敌人</small>
+            <small>击败敌人收集星辉经验；升级随机出现射击、宠物、聚怪流派词条，逐步构筑你的专精</small>
           </div>
+          <div class="buff-count">已选祝福 <strong id="hudBuffs">0</strong></div>
         </div>
       </section>
     </main>
 
     <footer class="site-footer">
-      <span>幻想割草：元素幸存者</span>
+      <span>米饭的自我救赎</span>
       <span class="footer-separator">✧</span>
-      <span>LOCAL BUILD · V0.3.0</span>
+      <span>LOCAL BUILD · V0.6.0</span>
     </footer>
-  </div>
-
-  <!-- 元素选择弹窗 -->
-  <div id="elementModal" class="modal-backdrop" hidden>
-    <section class="modal-panel element-modal" role="dialog" aria-modal="true" aria-labelledby="elementModalTitle">
-      <button class="modal-close" type="button" data-action="close-element" aria-label="关闭">×</button>
-      <p class="eyebrow">CHOOSE YOUR ELEMENT</p>
-      <h2 id="elementModalTitle">选择初始元素</h2>
-      <p class="modal-description">选择你的初始元素。攻击会附着元素，连续命中不同元素可触发反应。</p>
-      <div id="elementChoices" class="element-grid">
-        <button class="element-choice fire" type="button" data-element="fire"><span>✹</span><strong>火</strong><small>灼烧 · 爆发</small></button>
-        <button class="element-choice water" type="button" data-element="water"><span>◉</span><strong>水</strong><small>连击 · 扩散</small></button>
-        <button class="element-choice electro" type="button" data-element="electro"><span>ϟ</span><strong>雷</strong><small>连锁 · 感电</small></button>
-        <button class="element-choice dendro" type="button" data-element="dendro"><span>❋</span><strong>草</strong><small>持续 · 控制</small></button>
-        <button class="element-choice cryo" type="button" data-element="cryo"><span>❄</span><strong>冰</strong><small>减速 · 冻结</small></button>
-        <button class="element-choice geo" type="button" data-element="geo"><span>◇</span><strong>岩</strong><small>坚固 · 重击</small></button>
-        <button class="element-choice anemo" type="button" data-element="anemo"><span>〰</span><strong>风</strong><small>穿透 · 击退</small></button>
-      </div>
-      <p class="modal-footnote">每次开局均可重新选择元素。WASD 或方向键移动，角色自动攻击最近敌人。</p>
-    </section>
   </div>
 
   <!-- 设置弹窗 -->
@@ -136,7 +113,7 @@
       <p class="eyebrow">SYSTEM SETTINGS</p>
       <h2 id="settingsTitle">游戏设置</h2>
       <div class="setting-row">
-        <div><strong>主音量</strong><small>音效将在阶段 5 接入</small></div>
+        <div><strong>主音量</strong><small>调整游戏音效音量</small></div>
         <label class="range-wrap"><input id="volumeInput" type="range" min="0" max="100" step="1" value="70"><output id="volumeOutput">70%</output></label>
       </div>
       <div class="setting-row">
@@ -188,6 +165,27 @@
     </section>
   </div>
 
+  <!-- 升级三选一 -->
+  <div id="upgradeModal" class="modal-backdrop upgrade-backdrop" hidden>
+    <section class="modal-panel upgrade-modal" role="dialog" aria-modal="true" aria-labelledby="upgradeTitle">
+      <p class="eyebrow">BLESSING OF THE STARS</p><h2 id="upgradeTitle">等级提升</h2><p id="upgradeSubtitle" class="modal-description">选择一项祝福，继续试炼</p>
+      <div id="upgradeCards" class="upgrade-cards"></div>
+    </section>
+  </div>
+  <!-- 永久商店 -->
+  <div id="shopModal" class="modal-backdrop" hidden><section class="modal-panel progression-modal" role="dialog" aria-modal="true" aria-labelledby="shopTitle">
+    <button class="modal-close" type="button" data-action="close-shop" aria-label="关闭">×</button><p class="eyebrow">SANCTUARY OF GROWTH</p><h2 id="shopTitle">永久升级</h2><p class="modal-description">消耗金币强化每次冒险的初始属性。价格按等级指数增长。</p>
+    <div class="shop-wallet">持有金币 <strong id="shopGold">0</strong></div><div id="shopCards" class="shop-cards"></div>
+  </section></div>
+  <!-- 转生 -->
+  <div id="prestigeModal" class="modal-backdrop" hidden><section class="modal-panel progression-modal" role="dialog" aria-modal="true" aria-labelledby="prestigeTitle">
+    <button class="modal-close" type="button" data-action="close-prestige" aria-label="关闭">×</button><p class="eyebrow">REBIRTH · ETERNAL LEGACY</p><h2 id="prestigeTitle">转生 / 声望</h2><p id="prestigeInfo" class="modal-description"></p>
+    <button id="confirmPrestige" class="menu-button menu-button-primary" type="button" data-action="confirm-prestige">献上此世积累，换取星辉碎片</button>
+  </section></div>
+  <!-- 离线收益 -->
+  <div id="offlineModal" class="modal-backdrop" hidden><section class="modal-panel pause-modal" role="dialog" aria-modal="true" aria-labelledby="offlineTitle">
+    <p class="eyebrow">WELCOME BACK</p><h2 id="offlineTitle">星辰仍在运转</h2><p id="offlineInfo" class="modal-description"></p><button class="menu-button menu-button-primary" type="button" data-action="close-offline">收下馈赠</button>
+  </section></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

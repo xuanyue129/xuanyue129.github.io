@@ -1,14 +1,13 @@
 /*
- * 阶段 3：可运行的生存战斗循环。
- * 负责输入、移动、自动攻击、敌人刷新、碰撞、元素附着/反应、掉落、升级、死亡结算与渲染。
- * 继续使用 window.FantasySurvivor.Game，保持阶段 2 的 init/start/pause/resume/stop 接口。
+ * 战斗核心：移动、自动攻击、敌人刷新、碰撞、掉落、升级与结算。
+ * 局内成长统一由升级三选一的祝福卡驱动，不再包含角色元素或元素反应系统。
  */
 (function (global) {
   "use strict";
 
   const CONFIG = Object.freeze({
     player: {
-      hp: 100,
+      hp: 3,
       speed: 240,
       damage: 12,
       attackInterval: 0.85,
@@ -57,36 +56,15 @@
     },
     grid: {
       cellSize: 120
-    }
+    },
+    progression: { goldPerLevel: 1, expPerLevel: 1 }
   });
 
-  const REACTIONS = {
-    "electro|water": { name: "感电", color: "#4FC3F7", multiplier: 1.35, radius: 104, chain: 3 },
-    "dendro|fire": { name: "燃烧", color: "#FF7A45", multiplier: 1.2, burn: true },
-    "cryo|electro": { name: "超导", color: "#B3E5FC", multiplier: 1.55, radius: 100, slow: true },
-    "fire|water": { name: "蒸发", color: "#F3DFA8", multiplier: 1.85, radius: 66 },
-    "electro|fire": { name: "超载", color: "#B388FF", multiplier: 1.65, radius: 118 },
-    "cryo|fire": { name: "融化", color: "#FFB7A2", multiplier: 1.9, radius: 60 },
-    "cryo|water": { name: "冻结", color: "#B3E5FC", multiplier: 1.15, freeze: true },
-    "dendro|water": { name: "绽生", color: "#8BC34A", multiplier: 1.4, radius: 90 },
-    "anemo|fire": { name: "火元素扩散", color: "#80CBC4", multiplier: 1.3, radius: 135 },
-    "anemo|water": { name: "水元素扩散", color: "#80CBC4", multiplier: 1.3, radius: 135 },
-    "anemo|electro": { name: "雷元素扩散", color: "#80CBC4", multiplier: 1.3, radius: 135 },
-    "anemo|dendro": { name: "草元素扩散", color: "#80CBC4", multiplier: 1.3, radius: 135 },
-    "anemo|cryo": { name: "冰元素扩散", color: "#80CBC4", multiplier: 1.3, radius: 135 },
-    "anemo|geo": { name: "结晶扩散", color: "#80CBC4", multiplier: 1.3, radius: 135 },
-    "geo|fire": { name: "火晶共鸣", color: "#FFCA28", multiplier: 1.45, radius: 76 },
-    "geo|water": { name: "水晶共鸣", color: "#FFCA28", multiplier: 1.45, radius: 76 },
-    "electro|dendro": { name: "激化", color: "#B388FF", multiplier: 1.55, radius: 86 },
-    "dendro|geo": { name: "根晶共鸣", color: "#8BC34A", multiplier: 1.4, radius: 76 },
-    "cryo|dendro": { name: "霜蔓共鸣", color: "#B3E5FC", multiplier: 1.4, radius: 76 },
-    "anemo|geo": { name: "风岩共鸣", color: "#80CBC4", multiplier: 1.4, radius: 86 },
-    "cryo|geo": { name: "碎晶", color: "#FFCA28", multiplier: 1.5, radius: 86 }
-  };
+  const THEME_COLOR = "#70C8E8";
+  const PROJECTILE_CRIT_COLOR = "#F0C56A";
 
   const Game = {
     CONFIG,
-    REACTIONS,
 
     backgroundCanvas: null,
     backgroundContext: null,
@@ -103,11 +81,17 @@
     projectiles: [],
     drops: [],
     particles: [],
+    vortices: [],
     enemyGrid: new Map(),
+    nextEnemyId: 1,
 
     player: null,
-    element: null,
     keys: new Set(),
+    joystickElement: null,
+    joystickKnob: null,
+    joystickPointerId: null,
+    touchMoveX: 0,
+    touchMoveY: 0,
 
     active: false,
     paused: false,
@@ -127,7 +111,7 @@
     runKills: 0,
     runGold: 0,
     runExperience: 0,
-    lastReaction: "等待元素附着……",
+    pendingLevelUps: 0,
     callbacks: {},
 
     init(options) {
@@ -139,6 +123,9 @@
       this.arenaContext = this.arenaCanvas
         ? this.arenaCanvas.getContext("2d")
         : null;
+      this.joystickElement = options.joystickElement || null;
+      this.joystickKnob = options.joystickKnob || null;
+      this.bindJoystick();
 
       this.resize();
 
@@ -168,8 +155,68 @@
       }
     },
 
+    bindJoystick() {
+      const element = this.joystickElement;
+      if (!element || element.dataset.bound === "true") return;
+      element.dataset.bound = "true";
+      const move = (event) => {
+        if (this.joystickPointerId !== event.pointerId) return;
+        const rect = element.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        const maxTravel = Math.max(12, Math.min(rect.width, rect.height) * 0.31);
+        let dx = event.clientX - centerX;
+        let dy = event.clientY - centerY;
+        const length = Math.hypot(dx, dy);
+        if (length > maxTravel) {
+          dx = dx / length * maxTravel;
+          dy = dy / length * maxTravel;
+        }
+        this.touchMoveX = dx / maxTravel;
+        this.touchMoveY = dy / maxTravel;
+        if (this.joystickKnob) {
+          this.joystickKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+        }
+        event.preventDefault();
+      };
+      const release = (event) => {
+        if (this.joystickPointerId !== event.pointerId) return;
+        this.joystickPointerId = null;
+        this.touchMoveX = 0;
+        this.touchMoveY = 0;
+        if (this.joystickKnob) this.joystickKnob.style.transform = "translate(-50%, -50%)";
+        if (element.hasPointerCapture && element.hasPointerCapture(event.pointerId)) {
+          element.releasePointerCapture(event.pointerId);
+        }
+        event.preventDefault();
+      };
+      element.addEventListener("pointerdown", (event) => {
+        if (!this.active || this.paused) return;
+        this.joystickPointerId = event.pointerId;
+        if (element.setPointerCapture) element.setPointerCapture(event.pointerId);
+        move(event);
+        event.preventDefault();
+      });
+      element.addEventListener("pointermove", move);
+      element.addEventListener("pointerup", release);
+      element.addEventListener("pointercancel", release);
+      element.addEventListener("lostpointercapture", release);
+    },
+
+    resetJoystick() {
+      this.joystickPointerId = null;
+      this.touchMoveX = 0;
+      this.touchMoveY = 0;
+      if (this.joystickKnob) this.joystickKnob.style.transform = "translate(-50%, -50%)";
+    },
+
     setCallbacks(callbacks) {
       this.callbacks = Object.assign({}, callbacks || {});
+    },
+
+    setProgression(saveData, shardMultiplier) {
+      this.saveData = saveData || null;
+      this.shardMultiplier = Number(shardMultiplier) || 1;
     },
 
     resizeCanvas(canvas, context) {
@@ -234,10 +281,8 @@
       this.keys.delete(event.code);
     },
 
-    start(elementId) {
+    start() {
       this.clearRunEntities();
-      this.element = global.FantasySurvivor.Elements.get(elementId) ||
-        global.FantasySurvivor.Elements.get("water");
 
       this.active = true;
       this.paused = false;
@@ -249,19 +294,24 @@
       this.runKills = 0;
       this.runGold = 0;
       this.runExperience = 0;
-      this.lastReaction = "等待元素附着……";
+      this.pendingLevelUps = 0;
       this.shakeTime = 0;
       this.shakeStrength = 0;
       this.keys.clear();
+      this.resetJoystick();
 
       this.resize();
+      const permanent = (this.saveData && this.saveData.permanentUpgrades) || {};
+      const shardMultiplier = this.shardMultiplier || 1;
+      const startingHearts = Math.max(3, Math.min(20, Math.floor((3 + (permanent.maxHp || 0)) * shardMultiplier)));
+      const startingDamage = (CONFIG.player.damage + (permanent.damage || 0) * 1.5) * shardMultiplier;
       this.player = global.FantasySurvivor.Entities.createPlayer({
         x: this.arenaWidth / 2,
         y: this.arenaHeight / 2,
-        hp: CONFIG.player.hp,
-        maxHp: CONFIG.player.hp,
+        hp: startingHearts,
+        maxHp: startingHearts,
         speed: CONFIG.player.speed,
-        damage: CONFIG.player.damage,
+        damage: startingDamage,
         attackInterval: CONFIG.player.attackInterval,
         attackRange: CONFIG.player.attackRange,
         projectileSpeed: CONFIG.player.projectileSpeed,
@@ -271,7 +321,35 @@
         exp: 0,
         level: 1,
         pickupRadius: CONFIG.player.pickupRadius,
-        element: this.element.id
+        projectileCount: 1, projectilePierce: 0,
+        ricochetChance: 0, critChance: 0, critMultiplier: 1.8,
+        damageReduction: 0,
+        buffCount: 0,
+        petCount: 0,
+        petDamage: startingDamage * 0.9,
+        petChargeDistance: 220,
+        petChargeWidth: 28,
+        petChargeInterval: 1.35,
+        petChargeSpeed: 900,
+        petTargetRange: 390,
+        petOrbitRadius: 58,
+        petAttackTimers: [],
+        petCharges: [],
+        vortexUnlocked: false, vortexShotCounter: 0, vortexShotsPerSummon: 8,
+        vortexCount: 1, vortexDamage: 8, vortexRadius: 102,
+        vortexDuration: 3.6, vortexPullStrength: 190,
+        fortuneUnlocked: false,
+        fortuneDamage: 7,
+        fortuneRadius: 100,
+        fortuneAuraDuration: 4.2,
+        fortuneAuraTimer: 0,
+        fortuneKillHealEvery: Infinity,
+        fortuneKillCounter: 0,
+        fortuneRegenInterval: Infinity,
+        fortuneRegenTimer: 0,
+        goldMultiplier: 1 + (permanent.goldRate || 0) * 0.08,
+        expMultiplier: 1 + (permanent.expRate || 0) * 0.07,
+        globalMultiplier: shardMultiplier
       });
 
       this.lastTime = performance.now();
@@ -283,6 +361,7 @@
       if (!this.active || this.paused) return;
       this.paused = true;
       this.keys.clear();
+      this.resetJoystick();
     },
 
     resume() {
@@ -298,10 +377,9 @@
       this.paused = false;
       this.inRun = false;
       this.keys.clear();
+      this.resetJoystick();
       this.player = null;
-      this.element = null;
       this.clearRunEntities();
-      this.lastReaction = "等待元素附着……";
     },
 
     clearRunEntities() {
@@ -314,7 +392,9 @@
       this.projectiles.length = 0;
       this.drops.length = 0;
       this.particles.length = 0;
+      this.vortices.length = 0;
       this.enemyGrid.clear();
+      this.nextEnemyId = 1;
     },
 
     setParticlesEnabled(value) {
@@ -350,11 +430,15 @@
       this.player.invuln = Math.max(0, this.player.invuln - dt);
       this.player.hitFlash = Math.max(0, this.player.hitFlash - dt);
       this.shakeTime = Math.max(0, this.shakeTime - dt);
-
       this.updatePlayerMovement(dt);
       this.updateEnemies(dt, wave);
+      this.updateVortices(dt);
+      this.updateFortuneAura(dt);
+      this.updateFortuneTimedHealing(dt);
+      this.separateEnemyBodies(80);
       this.rebuildEnemyGrid();
       this.updateAutoAttack(dt);
+      this.updatePetAttacks(dt);
       this.updateProjectiles(dt);
       this.updateDrops(dt);
       this.updateParticles(dt);
@@ -362,8 +446,8 @@
 
       this.hudTimer -= dt;
       if (this.hudTimer <= 0) {
+        this.updateHUD(true);
         this.hudTimer = 0.10;
-        this.updateHUD(false);
       }
 
       if (this.player.hp <= 0) {
@@ -384,6 +468,8 @@
       if (this.keys.has("KeyD") || this.keys.has("ArrowRight")) dx += 1;
       if (this.keys.has("KeyW") || this.keys.has("ArrowUp")) dy -= 1;
       if (this.keys.has("KeyS") || this.keys.has("ArrowDown")) dy += 1;
+      dx += this.touchMoveX;
+      dy += this.touchMoveY;
 
       if (dx !== 0 || dy !== 0) {
         const length = Math.hypot(dx, dy) || 1;
@@ -423,30 +509,12 @@
 
         enemy.flash = Math.max(0, enemy.flash - dt);
         enemy.contactCooldown = Math.max(0, enemy.contactCooldown - dt);
-        enemy.slowTime = Math.max(0, enemy.slowTime - dt);
-        enemy.freezeTime = Math.max(0, enemy.freezeTime - dt);
-        enemy.burnTime = Math.max(0, enemy.burnTime - dt);
-
-        if (enemy.burnTime > 0) {
-          enemy.burnTick -= dt;
-          if (enemy.burnTick <= 0) {
-            enemy.burnTick = 0.55;
-            this.damageEnemy(enemy, enemy.burnDamage, false);
-            this.spawnBurst(enemy.x, enemy.y, "#FF7A45", 2, 12);
-          }
-        }
-
-        if (enemy.dead) continue;
-
         const vx = p.x - enemy.x;
         const vy = p.y - enemy.y;
         const distance = Math.hypot(vx, vy) || 1;
-        const frozen = enemy.freezeTime > 0;
-        const slowFactor = enemy.slowTime > 0 ? 0.58 : 1;
-        const moveFactor = frozen ? 0 : slowFactor;
 
-        enemy.vx = (vx / distance) * enemy.speed * moveFactor;
-        enemy.vy = (vy / distance) * enemy.speed * moveFactor;
+        enemy.vx = (vx / distance) * enemy.speed;
+        enemy.vy = (vy / distance) * enemy.speed;
         enemy.x += enemy.vx * dt;
         enemy.y += enemy.vy * dt;
 
@@ -507,19 +575,70 @@
         color = "#B388FF";
       }
 
-      const elementIds = global.FantasySurvivor.Elements.list()
-        .map((item) => item.id)
-        .filter((id) => id !== this.element.id);
-      const affinity = elementIds[Math.floor(Math.random() * elementIds.length)];
+      // 新敌人尽量从未被占据的位置入场，避免刚生成时就重叠。
+      for (let attempt = 0; attempt < 18; attempt += 1) {
+        let occupied = false;
+        for (const other of this.enemies) {
+          if (other.dead) continue;
+          const gap = radius + other.radius + 3;
+          if ((other.x - x) ** 2 + (other.y - y) ** 2 < gap * gap) {
+            occupied = true;
+            break;
+          }
+        }
+        if (!occupied) break;
+        if (side === 0 || side === 2) x = Math.random() * w;
+        else y = Math.random() * h;
+      }
 
       this.enemies.push(entities.acquire("enemy", {
+        id: this.nextEnemyId++,
         x, y, hp, maxHp: hp, speed, damage, radius, kind, color,
-        contactCooldown: 0, flash: 0, slowTime: 0, freezeTime: 0,
-        burnTime: 0, burnTick: 0, burnDamage: 0,
-        affinity,
-        elementMarks: { [affinity]: this.elapsed + 25 },
-        dead: false
+        contactCooldown: 0, flash: 0, dead: false
       }));
+    },
+
+    // 逐对推开相交的敌人。多轮松弛可处理一大群敌人挤在同一位置的情况。
+    separateEnemyBodies(iterations = 8) {
+      const active = this.enemies.filter(enemy => !enemy.dead);
+      if (active.length < 2) return;
+      const passes = Math.max(1, Math.min(80, iterations | 0));
+      for (let pass = 0; pass < passes; pass += 1) {
+        let moved = false;
+        for (let i = 0; i < active.length - 1; i += 1) {
+          const a = active[i];
+          for (let j = i + 1; j < active.length; j += 1) {
+            const b = active[j];
+            let dx = b.x - a.x;
+            let dy = b.y - a.y;
+            let distanceSq = dx * dx + dy * dy;
+            const minDistance = a.radius + b.radius + 1.25;
+            if (distanceSq >= minDistance * minDistance) continue;
+
+            let distance;
+            if (distanceSq < 0.0001) {
+              // 同坐标时以实体 ID 产生稳定方向，避免随机抖动。
+              const angle = ((a.id * 97 + b.id * 57) % 360) * Math.PI / 180;
+              dx = Math.cos(angle);
+              dy = Math.sin(angle);
+              distance = 1;
+            } else {
+              distance = Math.sqrt(distanceSq);
+              dx /= distance;
+              dy /= distance;
+            }
+
+            const overlap = minDistance - distance;
+            const push = overlap * 0.51 + 0.015;
+            a.x -= dx * push;
+            a.y -= dy * push;
+            b.x += dx * push;
+            b.y += dy * push;
+            moved = true;
+          }
+        }
+        if (!moved) break;
+      }
     },
 
     rebuildEnemyGrid() {
@@ -559,6 +678,24 @@
       return result;
     },
 
+    findNearestEnemyFrom(x, y, range, excludedIds = []) {
+      const candidates = this.queryEnemies(x, y, range);
+      const excluded = new Set(excludedIds || []);
+      let nearest = null;
+      let bestDistance = range * range;
+      for (const enemy of candidates) {
+        if (enemy.dead || excluded.has(enemy.id)) continue;
+        const dx = enemy.x - x;
+        const dy = enemy.y - y;
+        const distanceSq = dx * dx + dy * dy;
+        if (distanceSq < bestDistance) {
+          bestDistance = distanceSq;
+          nearest = enemy;
+        }
+      }
+      return nearest;
+    },
+
     findNearestEnemy() {
       const p = this.player;
       const candidates = this.queryEnemies(p.x, p.y, p.attackRange);
@@ -592,23 +729,202 @@
 
       const dx = target.x - p.x;
       const dy = target.y - p.y;
-      const distance = Math.hypot(dx, dy) || 1;
+      const baseAngle = Math.atan2(dy, dx);
+      const count = Math.max(1, Math.min(7, Math.floor(p.projectileCount || 1)));
+      const spreadStep = 0.12;
       const entities = global.FantasySurvivor.Entities;
-      const projectile = entities.acquire("projectile", {
-        x: p.x,
-        y: p.y,
-        vx: (dx / distance) * p.projectileSpeed,
-        vy: (dy / distance) * p.projectileSpeed,
-        damage: p.damage,
-        radius: p.projectileRadius,
-        life: CONFIG.projectile.life,
-        color: this.element.color,
-        element: this.element.id,
-        dead: false
-      });
-      this.projectiles.push(projectile);
-      this.spawnBurst(p.x, p.y, this.element.color, 2, 14);
+
+      for (let i = 0; i < count; i += 1) {
+        const angle = baseAngle + (i - (count - 1) / 2) * spreadStep;
+        const critical = p.critChance > 0 && Math.random() < p.critChance;
+        const projectile = entities.acquire("projectile", {
+          x: p.x,
+          y: p.y,
+          vx: Math.cos(angle) * p.projectileSpeed,
+          vy: Math.sin(angle) * p.projectileSpeed,
+          damage: p.damage * (critical ? p.critMultiplier : 1),
+          radius: p.projectileRadius,
+          life: CONFIG.projectile.life,
+          color: critical ? PROJECTILE_CRIT_COLOR : THEME_COLOR,
+          isCritical: critical,
+          isPet: false,
+          ricochetChance: p.ricochetChance || 0,
+          ricochetsLeft: 3,
+          pierceRemaining: Math.max(0, Math.floor(p.projectilePierce || 0)),
+          hitEnemies: [],
+          dead: false
+        });
+        this.projectiles.push(projectile);
+      }
+
+      this.spawnBurst(p.x, p.y, THEME_COLOR, 2 + count, 14);
       p.attackTimer = p.attackInterval;
+
+      // 每轮主角射击计数一次，与本轮子弹数量无关。
+      if (p.vortexUnlocked) {
+        p.vortexShotCounter += 1;
+        while (p.vortexShotCounter >= p.vortexShotsPerSummon) {
+          p.vortexShotCounter -= p.vortexShotsPerSummon;
+          this.spawnVortices(target);
+        }
+      }
+    },
+
+    updatePetAttacks(dt) {
+      const p = this.player;
+      if (!p || !p.petCount) return;
+      if (!Array.isArray(p.petAttackTimers)) p.petAttackTimers = [];
+      if (!Array.isArray(p.petCharges)) p.petCharges = [];
+      while (p.petAttackTimers.length < p.petCount) p.petAttackTimers.push(0.25);
+      while (p.petCharges.length < p.petCount) p.petCharges.push(null);
+      p.petAttackTimers.length = p.petCount;
+      p.petCharges.length = p.petCount;
+
+      const count = p.petCount;
+      const phase = this.elapsed * 0.95;
+      for (let i = 0; i < count; i += 1) {
+        let charge = p.petCharges[i];
+        if (charge) {
+          const step = Math.min(charge.distance - charge.travelled, charge.speed * dt);
+          const nextX = charge.x + charge.dirX * step;
+          const nextY = charge.y + charge.dirY * step;
+          const hitWidth = charge.width * 0.5;
+          for (const enemy of this.enemies) {
+            if (enemy.dead || charge.hitEnemies.includes(enemy.id)) continue;
+            const distanceSq = this.distancePointToSegmentSquared(enemy.x, enemy.y, charge.x, charge.y, nextX, nextY);
+            const collisionRadius = hitWidth + enemy.radius;
+            if (distanceSq <= collisionRadius * collisionRadius) {
+              charge.hitEnemies.push(enemy.id);
+              this.damageEnemy(enemy, charge.damage, true);
+              this.spawnBurst(enemy.x, enemy.y, "#C7B4FF", 3, 30);
+            }
+          }
+          charge.x = nextX;
+          charge.y = nextY;
+          charge.travelled += step;
+          if (charge.travelled >= charge.distance - 0.5) {
+            p.petCharges[i] = null;
+            p.petAttackTimers[i] = p.petChargeInterval;
+          }
+          continue;
+        }
+
+        p.petAttackTimers[i] -= dt;
+        if (p.petAttackTimers[i] > 0) continue;
+        const angle = phase + i * Math.PI * 2 / count;
+        const petX = p.x + Math.cos(angle) * p.petOrbitRadius;
+        const petY = p.y + Math.sin(angle) * p.petOrbitRadius * 0.66;
+        const target = this.findNearestEnemyFrom(petX, petY, p.petTargetRange);
+        if (!target) {
+          p.petAttackTimers[i] = 0.2;
+          continue;
+        }
+
+        const dx = target.x - petX;
+        const dy = target.y - petY;
+        const length = Math.hypot(dx, dy) || 1;
+        p.petCharges[i] = {
+          x: petX, y: petY, startX: petX, startY: petY,
+          dirX: dx / length, dirY: dy / length,
+          travelled: 0, distance: p.petChargeDistance,
+          speed: p.petChargeSpeed, width: p.petChargeWidth,
+          damage: p.petDamage, hitEnemies: []
+        };
+        this.spawnBurst(petX, petY, "#B99AFF", 4, 35);
+      }
+    },
+
+    distancePointToSegmentSquared(px, py, x1, y1, x2, y2) {
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const lengthSq = dx * dx + dy * dy;
+      if (lengthSq <= 0.0001) return (px - x1) ** 2 + (py - y1) ** 2;
+      const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lengthSq));
+      const nearestX = x1 + t * dx;
+      const nearestY = y1 + t * dy;
+      return (px - nearestX) ** 2 + (py - nearestY) ** 2;
+    },
+
+    spawnVortices(target) {
+      const p = this.player;
+      if (!p || !p.vortexUnlocked) return;
+      const amount = Math.max(1, Math.min(4, p.vortexCount || 1));
+      const baseAngle = target ? Math.atan2(target.y - p.y, target.x - p.x) : this.elapsed;
+      for (let i = 0; i < amount; i += 1) {
+        const angle = baseAngle + (amount > 1 ? i * Math.PI * 2 / amount : 0) + (Math.random() - 0.5) * 0.5;
+        const offset = amount > 1 ? 46 : 0;
+        const x = (target ? target.x : p.x) + Math.cos(angle) * offset;
+        const y = (target ? target.y : p.y) + Math.sin(angle) * offset;
+        this.vortices.push({
+          x, y,
+          radius: p.vortexRadius,
+          duration: p.vortexDuration,
+          maxDuration: p.vortexDuration,
+          damage: p.vortexDamage,
+          pullStrength: p.vortexPullStrength,
+          rotation: Math.random() * Math.PI * 2
+        });
+      }
+      // 限制场上漩涡总量，避免后期特效与计算量无限累积。
+      while (this.vortices.length > 12) this.vortices.shift();
+    },
+
+    updateVortices(dt) {
+      if (!this.vortices.length) return;
+      for (let i = this.vortices.length - 1; i >= 0; i -= 1) {
+        const vortex = this.vortices[i];
+        vortex.duration -= dt;
+        vortex.rotation += dt * 2.2;
+        if (vortex.duration <= 0) {
+          this.vortices.splice(i, 1);
+          continue;
+        }
+
+        for (const enemy of this.enemies) {
+          if (enemy.dead) continue;
+          const dx = vortex.x - enemy.x;
+          const dy = vortex.y - enemy.y;
+          const distance = Math.hypot(dx, dy);
+          if (distance >= vortex.radius) continue;
+
+          // 越靠近外缘牵引越弱，接近中心时保留少量回旋空间。
+          const normalized = 1 - distance / vortex.radius;
+          const pull = Math.min(Math.max(0, distance - 4), vortex.pullStrength * normalized * dt);
+          if (distance > 0.001 && pull > 0) {
+            enemy.x += dx / distance * pull;
+            enemy.y += dy / distance * pull;
+          }
+          this.damageEnemy(enemy, vortex.damage * dt, false);
+        }
+      }
+    },
+
+    updateFortuneAura(dt) {
+      const p = this.player;
+      if (!p || !p.fortuneUnlocked || p.fortuneAuraTimer <= 0) return;
+      p.fortuneAuraTimer = Math.max(0, p.fortuneAuraTimer - dt);
+      const radiusSq = p.fortuneRadius * p.fortuneRadius;
+      for (const enemy of this.enemies) {
+        if (enemy.dead) continue;
+        const dx = enemy.x - p.x;
+        const dy = enemy.y - p.y;
+        if (dx * dx + dy * dy <= radiusSq) {
+          this.damageEnemy(enemy, p.fortuneDamage * dt, false);
+        }
+      }
+    },
+
+    updateFortuneTimedHealing(dt) {
+      const p = this.player;
+      if (!p || !p.fortuneUnlocked || !Number.isFinite(p.fortuneRegenInterval)) return;
+      p.fortuneRegenTimer += dt;
+      if (p.fortuneRegenTimer >= p.fortuneRegenInterval) {
+        p.fortuneRegenTimer -= p.fortuneRegenInterval;
+        if (p.hp < p.maxHp) {
+          p.hp = Math.min(p.maxHp, p.hp + 1);
+          this.updateHUD(true);
+        }
+      }
     },
 
     updateProjectiles(dt) {
@@ -629,7 +945,7 @@
         let hit = null;
         for (let j = 0; j < nearby.length; j += 1) {
           const enemy = nearby[j];
-          if (enemy.dead) continue;
+          if (enemy.dead || (shot.hitEnemies && shot.hitEnemies.includes(enemy.id))) continue;
           const dx = enemy.x - shot.x;
           const dy = enemy.y - shot.y;
           const rr = enemy.radius + shot.radius;
@@ -640,92 +956,35 @@
         }
 
         if (hit) {
+          if (!shot.hitEnemies) shot.hitEnemies = [];
+          shot.hitEnemies.push(hit.id);
           this.damageEnemy(hit, shot.damage, true);
-          if (!hit.dead) this.applyElement(hit, shot.element, shot.damage);
-          this.spawnBurst(shot.x, shot.y, shot.color, 4, 42);
-          entities.release("projectile", this.projectiles.splice(i, 1)[0]);
-        }
-      }
-    },
+          this.spawnBurst(shot.x, shot.y, shot.color, shot.isCritical ? 7 : 4, shot.isCritical ? 58 : 42);
 
-    applyElement(enemy, elementId, baseDamage) {
-      if (!enemy || enemy.dead) return;
-      const now = this.elapsed;
-      const marks = enemy.elementMarks || (enemy.elementMarks = {});
+          const canRicochet = !shot.isPet && shot.ricochetsLeft > 0 &&
+            shot.ricochetChance > 0 && Math.random() < shot.ricochetChance;
+          const nextTarget = canRicochet
+            ? this.findNearestEnemyFrom(hit.x, hit.y, 230, shot.hitEnemies)
+            : null;
 
-      Object.keys(marks).forEach((id) => {
-        if (marks[id] <= now) delete marks[id];
-      });
-
-      const previous = Object.keys(marks).find((id) => id !== elementId && marks[id] > now);
-      marks[elementId] = now + 4.5;
-
-      if (previous) {
-        this.triggerReaction(enemy, previous, elementId, baseDamage);
-        enemy.elementMarks = {};
-        enemy.elementMarks[elementId] = now + 2.5;
-      }
-    },
-
-    triggerReaction(enemy, first, second, baseDamage) {
-      if (!enemy || enemy.dead) return;
-      const pair = [first, second].sort().join("|");
-      const reaction = REACTIONS[pair] || {
-        name: "元素共鸣",
-        color: this.element.color,
-        multiplier: 1.25,
-        radius: 58
-      };
-
-      this.lastReaction = reaction.name;
-      if (typeof this.callbacks.onReaction === "function") {
-        this.callbacks.onReaction(reaction.name, reaction.color);
-      }
-
-      this.damageEnemy(enemy, baseDamage * reaction.multiplier, false);
-      this.spawnBurst(enemy.x, enemy.y, reaction.color, 18, 105);
-
-      if (reaction.burn && !enemy.dead) {
-        enemy.burnTime = Math.max(enemy.burnTime, 3.2);
-        enemy.burnTick = 0.3;
-        enemy.burnDamage = Math.max(2, baseDamage * 0.42);
-      }
-
-      if (reaction.freeze && !enemy.dead) {
-        enemy.freezeTime = Math.max(enemy.freezeTime, 1.45);
-      }
-
-      if (reaction.slow && !enemy.dead) {
-        enemy.slowTime = Math.max(enemy.slowTime, 3.0);
-      }
-
-      if (reaction.radius) {
-        const targets = this.queryEnemies(enemy.x, enemy.y, reaction.radius);
-        for (let i = 0; i < targets.length; i += 1) {
-          const other = targets[i];
-          if (other === enemy || other.dead) continue;
-          const distance = Math.hypot(other.x - enemy.x, other.y - enemy.y);
-          if (distance <= reaction.radius) {
-            this.damageEnemy(other, baseDamage * reaction.multiplier * 0.45, false);
-            if (reaction.slow) other.slowTime = Math.max(other.slowTime, 1.8);
+          if (nextTarget) {
+            const dx = nextTarget.x - hit.x;
+            const dy = nextTarget.y - hit.y;
+            const distance = Math.hypot(dx, dy) || 1;
+            const speed = Math.hypot(shot.vx, shot.vy) || CONFIG.player.projectileSpeed;
+            shot.x = hit.x;
+            shot.y = hit.y;
+            shot.vx = dx / distance * speed;
+            shot.vy = dy / distance * speed;
+            shot.life = Math.max(shot.life, 0.42);
+            shot.ricochetsLeft -= 1;
+            this.spawnBurst(hit.x, hit.y, "#9FE7F2", 5, 36);
+          } else if (shot.pierceRemaining > 0) {
+            shot.pierceRemaining -= 1;
+          } else {
+            entities.release("projectile", this.projectiles.splice(i, 1)[0]);
           }
         }
-      }
-
-      if (reaction.chain) {
-        const targets = this.queryEnemies(enemy.x, enemy.y, 180)
-          .filter((item) => item !== enemy && !item.dead)
-          .sort((a, b) => {
-            const da = Math.hypot(a.x - enemy.x, a.y - enemy.y);
-            const db = Math.hypot(b.x - enemy.x, b.y - enemy.y);
-            return da - db;
-          })
-          .slice(0, reaction.chain);
-
-        targets.forEach((other) => {
-          this.damageEnemy(other, baseDamage * 0.55, false);
-          this.spawnBurst(other.x, other.y, reaction.color, 5, 44);
-        });
       }
     },
 
@@ -740,6 +999,17 @@
       if (enemy.dead) return;
       enemy.dead = true;
       this.runKills += 1;
+      const p = this.player;
+      if (p && p.fortuneUnlocked && Number.isFinite(p.fortuneKillHealEvery)) {
+        p.fortuneKillCounter += 1;
+        if (p.fortuneKillCounter >= p.fortuneKillHealEvery) {
+          p.fortuneKillCounter = 0;
+          if (p.hp < p.maxHp) {
+            p.hp = Math.min(p.maxHp, p.hp + 1);
+            this.updateHUD(true);
+          }
+        }
+      }
       this.spawnDrop(enemy.x + (Math.random() - 0.5) * 12,
         enemy.y + (Math.random() - 0.5) * 12, "exp", enemy.kind === "elite" ? 12 : (enemy.kind === "fast" ? 6 : 5));
 
@@ -808,7 +1078,7 @@
 
         if (distance < p.radius + drop.radius + 5) {
           if (drop.kind === "gold") {
-            this.runGold += drop.value;
+            this.runGold += Math.max(1, Math.floor(drop.value * (p.goldMultiplier || 1) * (p.globalMultiplier || 1)));
           } else {
             this.addExperience(drop.value);
           }
@@ -820,18 +1090,35 @@
 
     addExperience(amount) {
       const p = this.player;
-      this.runExperience += amount;
-      p.exp += amount;
+      const gained = Math.max(0, amount * (p.expMultiplier || 1) * (p.globalMultiplier || 1));
+      this.runExperience += gained;
+      p.exp += gained;
       while (p.exp >= this.expToNextLevel(p.level)) {
         p.exp -= this.expToNextLevel(p.level);
         p.level += 1;
-        p.maxHp += 3;
-        p.hp = Math.min(p.maxHp, p.hp + 5);
-        p.damage += 0.8;
-        p.attackInterval = Math.max(0.42, p.attackInterval * 0.992);
-        if (typeof this.callbacks.onLevelUp === "function") {
-          this.callbacks.onLevelUp(p.level);
-        }
+        this.pendingLevelUps += 1;
+      }
+      this.updateHUD(true);
+      if (this.pendingLevelUps > 0 && !this.paused) {
+        this.pause();
+        if (typeof this.callbacks.onLevelUp === "function") this.callbacks.onLevelUp(p.level, this.pendingLevelUps);
+      }
+    },
+
+    applyUpgrade(card) {
+      if (!this.player || !card || typeof card.apply !== "function") return false;
+      card.apply(this.player);
+      this.player.buffCount = (this.player.buffCount || 0) + 1;
+      this.pendingLevelUps = Math.max(0, this.pendingLevelUps - 1);
+      this.updateHUD(true);
+      return true;
+    },
+
+    continueAfterUpgrade() {
+      if (this.pendingLevelUps > 0) {
+        if (typeof this.callbacks.onLevelUp === "function") this.callbacks.onLevelUp(this.player.level, this.pendingLevelUps);
+      } else {
+        this.resume();
       }
     },
 
@@ -842,9 +1129,11 @@
     damagePlayer(amount) {
       const p = this.player;
       if (!p || p.invuln > 0 || !this.active) return;
-      p.hp = Math.max(0, p.hp - amount);
+      // 生命值按整颗心计数：每次有效受击固定扣除 1 颗心。
+      p.hp = Math.max(0, Math.floor(p.hp) - 1);
       p.invuln = CONFIG.player.invulnerability;
       p.hitFlash = 0.18;
+      if (p.fortuneUnlocked) p.fortuneAuraTimer = p.fortuneAuraDuration;
       if (this.screenShakeEnabled) {
         this.shakeTime = 0.16;
         this.shakeStrength = 4;
@@ -853,6 +1142,7 @@
       if (typeof this.callbacks.onPlayerHit === "function") {
         this.callbacks.onPlayerHit(p.hp, p.maxHp);
       }
+      this.updateHUD(true);
     },
 
     spawnBurst(x, y, color, count, speed) {
@@ -900,9 +1190,8 @@
       }
     },
 
-    updateHUD(force) {
+    updateHUD() {
       if (!this.player || typeof this.callbacks.onHUD !== "function") return;
-      if (!force && this.hudTimer > 0) return;
       const p = this.player;
       const expRequired = this.expToNextLevel(p.level);
       this.callbacks.onHUD({
@@ -917,8 +1206,7 @@
         kills: this.runKills,
         wave: this.getWave(),
         time: this.elapsed,
-        element: this.element,
-        reaction: this.lastReaction
+        buffs: this.player.buffCount || 0
       });
     },
 
@@ -934,8 +1222,8 @@
         kills: this.runKills,
         level: this.player.level,
         gold: this.runGold,
-        experience: this.runExperience,
-        element: this.element ? this.element.id : "water"
+        experience: Math.floor(this.runExperience),
+        wave: this.getWave()
       };
 
       this.updateHUD(true);
@@ -1060,9 +1348,12 @@
       ctx.restore();
 
       this.drawDrops(ctx, time);
+      this.drawVortices(ctx, time);
+      this.drawFortuneAura(ctx, time);
       this.drawEnemies(ctx);
       this.drawProjectiles(ctx);
       this.drawPlayer(ctx, time);
+      this.drawPets(ctx, time);
       this.drawParticles(ctx);
       ctx.restore();
     },
@@ -1133,25 +1424,6 @@
           ctx.fillStyle = enemy.kind === "elite" ? "#B388FF" : "#E68B83";
           ctx.fillRect(-barWidth / 2, -enemy.radius - 9, barWidth * Math.max(0, enemy.hp / enemy.maxHp), 3);
         }
-        if (enemy.affinity && enemy.elementMarks && enemy.elementMarks[enemy.affinity] > this.elapsed) {
-          const affinity = global.FantasySurvivor.Elements.get(enemy.affinity);
-          if (affinity) {
-            ctx.strokeStyle = affinity.color;
-            ctx.globalAlpha = 0.66;
-            ctx.lineWidth = 1.2;
-            ctx.beginPath();
-            ctx.arc(0, 0, enemy.radius + 3, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.globalAlpha = 1;
-          }
-        }
-        if (enemy.freezeTime > 0) {
-          ctx.strokeStyle = "#B3E5FC";
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          ctx.arc(0, 0, enemy.radius + 4, 0, Math.PI * 2);
-          ctx.stroke();
-        }
         ctx.restore();
       });
     },
@@ -1179,7 +1451,7 @@
     drawPlayer(ctx, time) {
       if (!this.player) return;
       const p = this.player;
-      const color = this.element ? this.element.color : "#4FC3F7";
+      const color = THEME_COLOR;
       const bob = Math.sin(time * 4) * 1.5;
       const blink = p.invuln > 0 && Math.floor(time * 18) % 2 === 0;
       ctx.save();
@@ -1213,6 +1485,137 @@
       ctx.arc(0, 0, p.radius, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
+      ctx.restore();
+    },
+
+    drawFortuneAura(ctx, time) {
+      const p = this.player;
+      if (!p || p.fortuneAuraTimer <= 0) return;
+      const fade = Math.min(1, p.fortuneAuraTimer / 0.55);
+      const radius = p.fortuneRadius;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 0.18 + fade * 0.2;
+      const glow = ctx.createRadialGradient(p.x, p.y, radius * 0.12, p.x, p.y, radius);
+      glow.addColorStop(0, "rgba(240,197,106,0.24)");
+      glow.addColorStop(0.72, "rgba(240,197,106,0.08)");
+      glow.addColorStop(1, "rgba(240,197,106,0)");
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 0.55 * fade;
+      ctx.strokeStyle = "rgba(255,219,133,0.9)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([7, 8]);
+      ctx.lineDashOffset = -time * 28;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, radius * (0.92 + Math.sin(time * 5) * 0.025), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    },
+
+    drawVortices(ctx, time) {
+      if (!this.vortices.length) return;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      this.vortices.forEach(vortex => {
+        const fade = Math.min(1, vortex.duration / 0.45, vortex.duration / vortex.maxDuration * 1.8);
+        const radius = vortex.radius;
+        const glow = ctx.createRadialGradient(vortex.x, vortex.y, 2, vortex.x, vortex.y, radius);
+        glow.addColorStop(0, "rgba(116, 229, 218, 0.22)");
+        glow.addColorStop(0.52, "rgba(93, 190, 206, 0.10)");
+        glow.addColorStop(1, "rgba(93, 190, 206, 0)");
+        ctx.globalAlpha = Math.max(0.15, fade);
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(vortex.x, vortex.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = "rgba(139, 231, 220, 0.82)";
+        ctx.lineWidth = 1.6;
+        ctx.setLineDash([8, 7]);
+        ctx.lineDashOffset = -time * 34;
+        ctx.beginPath();
+        ctx.arc(vortex.x, vortex.y, radius * 0.92, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        for (let arm = 0; arm < 3; arm += 1) {
+          const angle = vortex.rotation + arm * Math.PI * 2 / 3;
+          ctx.beginPath();
+          ctx.ellipse(vortex.x, vortex.y, radius * 0.72, radius * 0.25, angle, angle, angle + Math.PI * 1.18);
+          ctx.strokeStyle = "rgba(159, 239, 226, 0.72)";
+          ctx.lineWidth = 1.8;
+          ctx.stroke();
+        }
+        ctx.fillStyle = "rgba(220, 255, 248, 0.9)";
+        ctx.beginPath();
+        ctx.arc(vortex.x, vortex.y, 4.5 + Math.sin(time * 9 + vortex.rotation) * 1.4, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.restore();
+    },
+
+    drawPets(ctx, time) {
+      const p = this.player;
+      if (!p || !p.petCount) return;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      for (let i = 0; i < p.petCount; i += 1) {
+        const charge = p.petCharges && p.petCharges[i];
+        let x;
+        let y;
+        let angle;
+        if (charge) {
+          x = charge.x;
+          y = charge.y;
+          angle = Math.atan2(charge.dirY, charge.dirX);
+          const trailLength = Math.min(charge.travelled, 70);
+          ctx.save();
+          ctx.lineCap = "round";
+          ctx.strokeStyle = "rgba(196,174,255,0.38)";
+          ctx.lineWidth = Math.max(5, charge.width * 0.72);
+          ctx.beginPath();
+          ctx.moveTo(x - charge.dirX * trailLength, y - charge.dirY * trailLength);
+          ctx.lineTo(x, y);
+          ctx.stroke();
+          ctx.strokeStyle = "rgba(236,226,255,0.9)";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(x - charge.dirX * trailLength, y - charge.dirY * trailLength);
+          ctx.lineTo(x, y);
+          ctx.stroke();
+          ctx.restore();
+        } else {
+          angle = time * 0.95 + i * Math.PI * 2 / p.petCount;
+          x = p.x + Math.cos(angle) * p.petOrbitRadius;
+          y = p.y + Math.sin(angle) * p.petOrbitRadius * 0.66;
+        }
+        const glow = ctx.createRadialGradient(x, y, 1, x, y, 19);
+        glow.addColorStop(0, "rgba(245,239,255,1)");
+        glow.addColorStop(0.36, "rgba(185,154,255,0.75)");
+        glow.addColorStop(1, "rgba(185,154,255,0)");
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(x, y, 19, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.fillStyle = "#D8CBFF";
+        ctx.strokeStyle = "rgba(255,255,255,0.95)";
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(9, 0);
+        ctx.lineTo(0, -6);
+        ctx.lineTo(-7, 0);
+        ctx.lineTo(0, 6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
       ctx.restore();
     },
 

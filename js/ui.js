@@ -1,132 +1,272 @@
-/* UI 状态、菜单、设置、HUD 和死亡结算。保持阶段 2 的 FantasySurvivor.UI 接口。 */
+/* 阶段6 UI：心数 HUD、流派随机升级、虚拟摇杆、永久商店、转生与结算。 */
 (function (global) {
   "use strict";
 
   const UI = {
     saveData: null,
-    toastTimer: 0,
     elements: {},
-    selectedElement: "water",
+    toastTimer: 0,
     lastResult: null,
     settingsPausedRun: false,
-
     init(saveData) {
       this.saveData = saveData;
+      const ids = [
+        "menuScreen", "gameScreen", "settingsModal", "pauseModal", "settlementModal", "toast",
+        "volumeInput", "volumeOutput", "particlesInput", "shakeInput", "hudHealth", "hudHearts",
+        "hudLevel", "hudExpText", "expFill", "hudGold", "hudWave", "hudKills", "hudTime", "hudBuffs",
+        "resultTime", "resultKills", "resultLevel", "resultExperience", "resultGold", "resultTotalGold",
+        "upgradeModal", "upgradeCards", "shopModal", "shopCards", "shopGold", "prestigeModal",
+        "prestigeInfo", "offlineModal", "offlineInfo", "upgradeTitle", "upgradeSubtitle", "confirmPrestige"
+      ];
+      ids.forEach(id => { this.elements[id] = document.getElementById(id); });
 
-      [
-        "menuScreen", "gameScreen", "elementModal", "settingsModal",
-        "pauseModal", "settlementModal", "toast", "volumeInput",
-        "volumeOutput", "particlesInput", "shakeInput", "hudElement",
-        "hudElementIcon", "hudHealth", "healthFill", "hudLevel",
-        "hudExpText", "expFill", "hudGold", "hudWave", "hudKills",
-        "hudTime", "hudReaction", "resultTime", "resultKills",
-        "resultLevel", "resultExperience", "resultGold", "resultTotalGold"
-      ].forEach((id) => {
-        this.elements[id] = document.getElementById(id);
-      });
-
-      document.addEventListener("click", (event) => this.handleClick(event));
-      document.addEventListener("keydown", (event) => this.handleKeydown(event));
-
-      global.FantasySurvivor.Game.setCallbacks({
-        onHUD: (data) => this.updateHUD(data),
-        onLevelUp: (level) => this.toast("等级提升至 Lv. " + level + "！攻击能力小幅增强。"),
-        onReaction: (name, color) => this.showReaction(name, color),
-        onGameOver: (result) => this.showSettlement(result),
-        onPause: (reason) => {
+      const app = global.FantasySurvivor;
+      app.Game.setProgression(this.saveData, app.Upgrades.shardMultiplier(this.saveData));
+      app.Game.setCallbacks({
+        onHUD: data => this.updateHUD(data),
+        onLevelUp: (level, count) => this.showUpgrade(level, count),
+        onGameOver: result => this.showSettlement(result),
+        onPause: reason => {
           if (reason === "visibility") this.openModal("pauseModal");
         }
       });
 
+      document.addEventListener("click", event => this.handleClick(event));
+      document.addEventListener("keydown", event => this.handleKeydown(event));
       this.bindSettings();
       this.refreshSettings();
+      this.refreshMenu();
+
+      if (this.saveData.offlineReward && this.saveData.offlineReward.gold > 0) {
+        const reward = this.saveData.offlineReward;
+        this.elements.offlineInfo.textContent = `离开期间 ${this.formatHours(reward.hours)}，依据最高波次 ${reward.wave} 获得 ${reward.gold} 金币（最多计算 8 小时）。`;
+        this.openModal("offlineModal");
+        this.saveData.offlineReward.gold = 0;
+      }
     },
 
     handleClick(event) {
-      const actionNode = event.target.closest("[data-action]");
-      const elementNode = event.target.closest("[data-element]");
-
-      if (elementNode) {
-        this.chooseElement(elementNode.dataset.element);
-        return;
-      }
-      if (!actionNode) return;
-
-      switch (actionNode.dataset.action) {
-        case "start":
-          this.openModal("elementModal");
-          break;
-        case "settings":
-          this.openSettings();
-          break;
-        case "close-settings":
-          this.closeSettings();
-          break;
-        case "close-element":
-          this.closeModal("elementModal");
-          break;
-        case "shop":
-          this.toast("永久升级商店将在阶段 4 开放。");
-          break;
-        case "prestige":
-          this.toast("转生与声望系统将在阶段 4 开放。");
-          break;
-        case "pause":
-          this.pauseGame();
-          break;
-        case "resume":
-          this.resumeGame();
-          break;
-        case "quit":
-          this.returnToMenu();
-          break;
-        case "retry":
-          this.retryRun();
-          break;
-        case "settlement-menu":
-          this.closeModal("settlementModal");
-          this.returnToMenu();
-          break;
-        case "reset-save":
-          this.resetSave();
-          break;
-        default:
-          break;
+      const action = event.target.closest("[data-action]");
+      if (!action) return;
+      switch (action.dataset.action) {
+        case "start": this.startRun(); break;
+        case "settings": this.openSettings(); break;
+        case "close-settings": this.closeSettings(); break;
+        case "shop": this.openShop(); break;
+        case "close-shop": this.closeModal("shopModal"); break;
+        case "prestige": this.openPrestige(); break;
+        case "close-prestige": this.closeModal("prestigeModal"); break;
+        case "confirm-prestige": this.doPrestige(); break;
+        case "close-offline": this.closeModal("offlineModal"); break;
+        case "pause": this.pauseGame(); break;
+        case "resume": this.resumeGame(); break;
+        case "quit": this.returnToMenu(); break;
+        case "retry": this.retryRun(); break;
+        case "settlement-menu": this.returnToMenu(); break;
+        case "reset-save": this.resetSave(); break;
+        case "upgrade-card": this.chooseUpgrade(Number(action.dataset.index)); break;
+        case "buy-upgrade": this.buyUpgrade(action.dataset.key); break;
       }
     },
 
     handleKeydown(event) {
       if (event.key !== "Escape") return;
-
-      if (!this.elements.settingsModal.hidden) {
-        this.closeSettings();
-      } else if (!this.elements.elementModal.hidden) {
-        this.closeModal("elementModal");
-      } else if (!this.elements.pauseModal.hidden) {
-        this.resumeGame();
-      } else if (!this.elements.settlementModal.hidden) {
-        this.closeModal("settlementModal");
-        this.returnToMenu();
-      } else if (!this.elements.gameScreen.hidden) {
-        this.pauseGame();
-      }
+      if (!this.elements.upgradeModal.hidden) return;
+      if (!this.elements.settingsModal.hidden) this.closeSettings();
+      else if (!this.elements.pauseModal.hidden) this.resumeGame();
+      else if (!this.elements.gameScreen.hidden) this.pauseGame();
     },
 
     openModal(id) {
       const modal = this.elements[id];
       if (!modal) return;
       modal.hidden = false;
-      const focusTarget = modal.querySelector("button, input");
-      if (focusTarget) focusTarget.focus({ preventScroll: true });
+      const focusable = modal.querySelector("button, input");
+      if (focusable) focusable.focus({ preventScroll: true });
     },
 
     closeModal(id) {
       if (this.elements[id]) this.elements[id].hidden = true;
     },
 
+    startRun() {
+      const app = global.FantasySurvivor;
+      ["pauseModal", "settlementModal", "upgradeModal"].forEach(id => this.closeModal(id));
+      this.elements.menuScreen.hidden = true;
+      this.elements.gameScreen.hidden = false;
+      app.Game.setProgression(this.saveData, app.Upgrades.shardMultiplier(this.saveData));
+      app.Game.start();
+      app.Game.resize();
+    },
+
+    pauseGame() {
+      const game = global.FantasySurvivor.Game;
+      if (game.active) {
+        game.pause();
+        this.openModal("pauseModal");
+      }
+    },
+
+    resumeGame() {
+      this.closeModal("pauseModal");
+      global.FantasySurvivor.Game.resume();
+    },
+
+    returnToMenu() {
+      const app = global.FantasySurvivor;
+      ["pauseModal", "settlementModal", "settingsModal", "upgradeModal"].forEach(id => this.closeModal(id));
+      this.settingsPausedRun = false;
+      app.Game.stop();
+      this.elements.gameScreen.hidden = true;
+      this.elements.menuScreen.hidden = false;
+      this.refreshMenu();
+    },
+
+    retryRun() {
+      this.startRun();
+    },
+
+    updateHUD(data) {
+      const currentHearts = Math.max(0, Math.ceil(data.hp));
+      const maximumHearts = Math.max(1, Math.ceil(data.maxHp));
+      this.elements.hudHealth.textContent = `${currentHearts} / ${maximumHearts}`;
+      this.elements.hudHearts.innerHTML = Array.from({ length: maximumHearts }, (_, index) =>
+        `<span class="${index < currentHearts ? "heart-full" : "heart-empty"}" aria-hidden="true">${index < currentHearts ? "♥" : "♡"}</span>`
+      ).join("");
+      this.elements.hudHearts.setAttribute("aria-label", `剩余 ${currentHearts} 颗心，共 ${maximumHearts} 颗心`);
+      this.elements.hudLevel.textContent = data.level;
+      this.elements.hudExpText.textContent = `${Math.floor(data.exp)} / ${data.expRequired}`;
+      this.elements.expFill.style.width = `${data.expPercent}%`;
+      this.elements.hudGold.textContent = data.gold;
+      this.elements.hudWave.textContent = String(data.wave).padStart(2, "0");
+      this.elements.hudKills.textContent = data.kills;
+      this.elements.hudTime.textContent = this.formatTime(data.time);
+      this.elements.hudBuffs.textContent = data.buffs;
+    },
+
+    showUpgrade(level, count) {
+      const app = global.FantasySurvivor;
+      const cards = app.Upgrades.rollCards(3, app.Game.player);
+      this.currentCards = cards;
+      this.elements.upgradeCards.innerHTML = cards.map((card, index) => {
+        const rarity = app.Upgrades.rarities[card.rarity];
+        const path = app.Upgrades.CONFIG.archetypes[card.archetype];
+        return `<button class="upgrade-card rarity-${card.rarity} path-${card.archetype}" type="button" data-action="upgrade-card" data-index="${index}" style="--rarity:${rarity.color};--path-color:${path.color}">
+          <span class="upgrade-path">${path.label}</span>
+          <span class="upgrade-rarity">${rarity.name}</span>
+          <span class="upgrade-icon">${card.icon || "✧"}</span>
+          <strong>${card.name}</strong>
+          <small>${card.desc}</small>
+        </button>`;
+      }).join("");
+      this.elements.upgradeTitle.textContent = `等级提升 · Lv.${level}`;
+      this.elements.upgradeSubtitle.textContent = count > 1
+        ? `还有 ${count} 次强化待选择 · 四大流派与通用词条随机出现`
+        : "射击、宠物、聚怪、大运与通用词条混合随机出现，选择你的构筑方向";
+      this.openModal("upgradeModal");
+    },
+
+    chooseUpgrade(index) {
+      const card = this.currentCards && this.currentCards[index];
+      if (!card) return;
+      const game = global.FantasySurvivor.Game;
+      if (!game.applyUpgrade(card)) return;
+      this.persist();
+      this.closeModal("upgradeModal");
+      game.continueAfterUpgrade();
+    },
+
+    showSettlement(result) {
+      this.lastResult = result;
+      this.saveData.gold += Math.floor(result.gold);
+      this.saveData.stats.lifetimeKills += result.kills;
+      this.saveData.stats.bestSurvivalSeconds = Math.max(this.saveData.stats.bestSurvivalSeconds, result.duration);
+      this.saveData.stats.bestLevel = Math.max(this.saveData.stats.bestLevel, result.level);
+      this.saveData.stats.bestWave = Math.max(this.saveData.stats.bestWave, result.wave || 1);
+      this.saveData.lastSeenAt = Date.now();
+      this.persist();
+      this.elements.resultTime.textContent = this.formatTime(result.duration);
+      this.elements.resultKills.textContent = result.kills;
+      this.elements.resultLevel.textContent = `Lv. ${result.level}`;
+      this.elements.resultExperience.textContent = Math.floor(result.experience || 0);
+      this.elements.resultGold.textContent = `+${Math.floor(result.gold)}`;
+      this.elements.resultTotalGold.textContent = this.saveData.gold;
+      this.openModal("settlementModal");
+    },
+
+    openShop() {
+      this.renderShop();
+      this.openModal("shopModal");
+    },
+
+    renderShop() {
+      const upgrades = global.FantasySurvivor.Upgrades;
+      this.elements.shopGold.textContent = this.saveData.gold;
+      this.elements.shopCards.innerHTML = Object.entries(upgrades.CONFIG.shop).map(([key, config]) => {
+        const level = this.saveData.permanentUpgrades[key] || 0;
+        const price = upgrades.getPermanentPrice(key, level);
+        const maxed = level >= config.maxLevel;
+        const disabled = maxed || this.saveData.gold < price;
+        return `<article class="shop-upgrade"><div><strong>${config.label}</strong><small>${config.description}</small><small>等级 ${level}/${config.maxLevel}</small></div>
+          <button class="shop-buy" type="button" data-action="buy-upgrade" data-key="${key}" ${disabled ? "disabled" : ""}>${maxed ? "已满级" : `✧ ${price} 金币`}</button></article>`;
+      }).join("");
+    },
+
+    buyUpgrade(key) {
+      const upgrades = global.FantasySurvivor.Upgrades;
+      const config = upgrades.CONFIG.shop[key];
+      if (!config) return;
+      const level = this.saveData.permanentUpgrades[key] || 0;
+      const price = upgrades.getPermanentPrice(key, level);
+      if (level >= config.maxLevel || this.saveData.gold < price) {
+        this.toast("金币不足或已达到最高等级。");
+        return;
+      }
+      this.saveData.gold -= price;
+      this.saveData.permanentUpgrades[key] = level + 1;
+      this.persist();
+      this.renderShop();
+      this.toast(`${config.label}提升至 Lv.${level + 1}`);
+    },
+
+    openPrestige() {
+      const upgrades = global.FantasySurvivor.Upgrades;
+      const canPrestige = this.saveData.stats.bestWave >= upgrades.CONFIG.prestige.minimumBestWave;
+      this.elements.prestigeInfo.textContent = `当前星辉碎片：${this.saveData.shards}；全局倍率：×${upgrades.shardMultiplier(this.saveData).toFixed(2)}。转生将重置金币与永久商店等级，换取 1 枚星辉碎片。${canPrestige ? "" : "需要至少到达第 2 波才能转生。"}`;
+      this.elements.confirmPrestige.disabled = !canPrestige;
+      this.openModal("prestigeModal");
+    },
+
+    doPrestige() {
+      const accepted = global.confirm("确认转生？金币和四项永久商店等级将清零，星辉碎片及其全局倍率永久保留。");
+      if (!accepted) return;
+      this.saveData.gold = 0;
+      this.saveData.permanentUpgrades = { maxHp: 0, damage: 0, goldRate: 0, expRate: 0 };
+      this.saveData.shards += global.FantasySurvivor.Upgrades.CONFIG.prestige.shardsPerPrestige;
+      this.saveData.prestigeCount += 1;
+      this.persist();
+      this.closeModal("prestigeModal");
+      this.toast("转生完成，获得 1 枚星辉碎片。");
+    },
+
+    refreshMenu() {
+      const summary = document.getElementById("menuSaveSummary");
+      if (summary) {
+        summary.textContent = `金币 ${this.saveData.gold} · 星辉碎片 ${this.saveData.shards} · 全局倍率 ×${global.FantasySurvivor.Upgrades.shardMultiplier(this.saveData).toFixed(2)}`;
+      }
+    },
+
+    formatTime(seconds) {
+      const time = Math.max(0, Math.floor(seconds || 0));
+      return `${String(Math.floor(time / 60)).padStart(2, "0")}:${String(time % 60).padStart(2, "0")}`;
+    },
+
+    formatHours(hours) {
+      return `${Math.floor(hours)}小时${Math.floor((hours % 1) * 60)}分钟`;
+    },
+
     openSettings() {
-      this.settingsPausedRun = !this.elements.gameScreen.hidden &&
-        global.FantasySurvivor.Game.active;
+      this.settingsPausedRun = !this.elements.gameScreen.hidden && global.FantasySurvivor.Game.active;
       if (this.settingsPausedRun) global.FantasySurvivor.Game.pause();
       this.openModal("settingsModal");
     },
@@ -139,133 +279,22 @@
       }
     },
 
-    chooseElement(id) {
-      const element = global.FantasySurvivor.Elements.get(id);
-      if (!element) return;
-      this.selectedElement = id;
-      this.closeModal("elementModal");
-      this.startRun(id);
-    },
-
-    startRun(elementId) {
-      const element = global.FantasySurvivor.Elements.get(elementId) ||
-        global.FantasySurvivor.Elements.get("water");
-      this.selectedElement = element.id;
-      this.closeModal("pauseModal");
-      this.closeModal("settlementModal");
-      this.elements.menuScreen.hidden = true;
-      this.elements.gameScreen.hidden = false;
-
-      this.elements.hudElement.textContent = element.name;
-      this.elements.hudElementIcon.textContent = element.symbol;
-      this.elements.hudElementIcon.style.color = element.color;
-      this.elements.hudReaction.textContent = "等待元素附着……";
-      this.elements.hudReaction.style.color = "";
-
-      global.FantasySurvivor.Game.start(element.id);
-      global.FantasySurvivor.Game.resize();
-    },
-
-    pauseGame() {
-      if (this.elements.gameScreen.hidden) return;
-      if (!global.FantasySurvivor.Game.active) return;
-      global.FantasySurvivor.Game.pause();
-      this.openModal("pauseModal");
-    },
-
-    resumeGame() {
-      this.closeModal("pauseModal");
-      global.FantasySurvivor.Game.resume();
-    },
-
-    returnToMenu() {
-      this.closeModal("pauseModal");
-      this.closeModal("settlementModal");
-      this.closeModal("settingsModal");
-      this.settingsPausedRun = false;
-      global.FantasySurvivor.Game.stop();
-      this.elements.gameScreen.hidden = true;
-      this.elements.menuScreen.hidden = false;
-    },
-
-    retryRun() {
-      const element = this.lastResult && this.lastResult.element
-        ? this.lastResult.element
-        : this.selectedElement;
-      this.startRun(element);
-    },
-
-    updateHUD(data) {
-      this.elements.hudHealth.textContent = data.hp + " / " + data.maxHp;
-      this.elements.healthFill.style.width = data.hpPercent + "%";
-      this.elements.hudLevel.textContent = String(data.level);
-      this.elements.hudExpText.textContent = data.exp + " / " + data.expRequired;
-      this.elements.expFill.style.width = data.expPercent + "%";
-      this.elements.hudGold.textContent = String(data.gold);
-      this.elements.hudWave.textContent = String(data.wave).padStart(2, "0");
-      this.elements.hudKills.textContent = String(data.kills);
-      this.elements.hudTime.textContent = this.formatTime(data.time);
-    },
-
-    showReaction(name, color) {
-      this.elements.hudReaction.textContent = name;
-      this.elements.hudReaction.style.color = color || "";
-    },
-
-    showSettlement(result) {
-      this.lastResult = result;
-      this.saveData.gold = Math.max(0, Number(this.saveData.gold) || 0) + result.gold;
-      this.saveData.stats.lifetimeKills =
-        Math.max(0, Number(this.saveData.stats.lifetimeKills) || 0) + result.kills;
-      this.saveData.stats.bestSurvivalSeconds = Math.max(
-        Number(this.saveData.stats.bestSurvivalSeconds) || 0,
-        result.duration
-      );
-      this.saveData.stats.bestLevel = Math.max(
-        Number(this.saveData.stats.bestLevel) || 1,
-        result.level
-      );
-      this.saveData.lastSeenAt = Date.now();
-      global.FantasySurvivor.Save.save(this.saveData);
-
-      this.elements.resultTime.textContent = this.formatTime(result.duration);
-      this.elements.resultKills.textContent = String(result.kills);
-      this.elements.resultLevel.textContent = "Lv. " + result.level;
-      this.elements.resultExperience.textContent = String(result.experience || 0);
-      this.elements.resultGold.textContent = "+" + result.gold;
-      this.elements.resultTotalGold.textContent = String(this.saveData.gold);
-      this.openModal("settlementModal");
-    },
-
-    formatTime(seconds) {
-      const total = Math.max(0, Math.floor(seconds || 0));
-      const minutes = Math.floor(total / 60);
-      const rest = total % 60;
-      return String(minutes).padStart(2, "0") + ":" + String(rest).padStart(2, "0");
-    },
-
     bindSettings() {
-      const volume = this.elements.volumeInput;
-      const particles = this.elements.particlesInput;
-      const shake = this.elements.shakeInput;
-
-      volume.addEventListener("input", () => {
-        const value = Number(volume.value);
+      this.elements.volumeInput.addEventListener("input", () => {
+        const value = Number(this.elements.volumeInput.value);
         this.saveData.settings.masterVolume = value;
-        this.elements.volumeOutput.value = value + "%";
+        this.elements.volumeOutput.value = `${value}%`;
         global.FantasySurvivor.Audio.setVolume(value / 100);
         this.persist();
       });
-
-      particles.addEventListener("change", () => {
-        this.saveData.settings.particles = particles.checked;
-        global.FantasySurvivor.Game.setParticlesEnabled(particles.checked);
+      this.elements.particlesInput.addEventListener("change", () => {
+        this.saveData.settings.particles = this.elements.particlesInput.checked;
+        global.FantasySurvivor.Game.setParticlesEnabled(this.saveData.settings.particles);
         this.persist();
       });
-
-      shake.addEventListener("change", () => {
-        this.saveData.settings.screenShake = shake.checked;
-        global.FantasySurvivor.Game.setScreenShakeEnabled(shake.checked);
+      this.elements.shakeInput.addEventListener("change", () => {
+        this.saveData.settings.screenShake = this.elements.shakeInput.checked;
+        global.FantasySurvivor.Game.setScreenShakeEnabled(this.saveData.settings.screenShake);
         this.persist();
       });
     },
@@ -273,7 +302,7 @@
     refreshSettings() {
       const settings = this.saveData.settings;
       this.elements.volumeInput.value = settings.masterVolume;
-      this.elements.volumeOutput.value = settings.masterVolume + "%";
+      this.elements.volumeOutput.value = `${settings.masterVolume}%`;
       this.elements.particlesInput.checked = settings.particles;
       this.elements.shakeInput.checked = settings.screenShake;
       global.FantasySurvivor.Audio.setVolume(settings.masterVolume / 100);
@@ -283,14 +312,16 @@
 
     persist() {
       global.FantasySurvivor.Save.save(this.saveData);
+      this.refreshMenu();
     },
 
     resetSave() {
-      const accepted = global.confirm("确定重置金币、成长记录和设置吗？此操作不可撤销。");
-      if (!accepted) return;
+      if (!global.confirm("确定彻底重置所有存档？金币、星辉碎片、永久升级、统计和设置都会清空。此操作不可撤销。")) return;
       this.saveData = global.FantasySurvivor.Save.reset();
+      global.FantasySurvivor.Game.setProgression(this.saveData, 1);
       this.refreshSettings();
-      this.toast("本地存档已重置。");
+      this.refreshMenu();
+      this.toast("存档已重置。");
     },
 
     toast(message) {
@@ -298,9 +329,7 @@
       node.textContent = message;
       node.classList.add("is-visible");
       global.clearTimeout(this.toastTimer);
-      this.toastTimer = global.setTimeout(() => {
-        node.classList.remove("is-visible");
-      }, 2400);
+      this.toastTimer = global.setTimeout(() => node.classList.remove("is-visible"), 2400);
     }
   };
 

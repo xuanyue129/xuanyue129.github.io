@@ -21,14 +21,12 @@
       type: "enemy", x: 0, y: 0, vx: 0, vy: 0,
       hp: 30, maxHp: 30, speed: 55, radius: 13,
       damage: 8, color: "#D98E91", kind: "normal",
-      contactCooldown: 0, flash: 0, slowTime: 0,
-      freezeTime: 0, burnTime: 0, burnTick: 0,
-      burnDamage: 0, affinity: null, elementMarks: {}, dead: false
+      contactCooldown: 0, flash: 0, dead: false
     },
     projectile: {
       type: "projectile", x: 0, y: 0, vx: 0, vy: 0,
-      damage: 12, radius: 5, life: 1.2, color: "#4FC3F7",
-      element: "water", dead: false
+      damage: 12, radius: 5, life: 1.2, color: "#70C8E8",
+      isCritical: false, pierceRemaining: 0, hitEnemies: [], dead: false
     },
     drop: {
       type: "drop", x: 0, y: 0, vx: 0, vy: 0,
@@ -44,9 +42,6 @@
 
   function make(type, options) {
     const entity = Object.assign({}, DEFAULTS[type], options || {});
-    if (type === "enemy") {
-      entity.elementMarks = Object.assign({}, options && options.elementMarks || {});
-    }
     return entity;
   }
 
@@ -59,9 +54,6 @@
     });
 
     Object.assign(entity, DEFAULTS[type], options || {});
-    if (type === "enemy") {
-      entity.elementMarks = Object.assign({}, options && options.elementMarks || {});
-    }
     return entity;
   }
 
@@ -92,7 +84,6 @@
       exp: 0,
       level: 1,
       pickupRadius: 78,
-      element: "water",
       hitFlash: 0
     }, options || {});
   }
