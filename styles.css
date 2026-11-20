@@ -1411,3 +1411,109 @@ body:not(.about-body) .game-screen {
     font-size: 9px;
   }
 }
+
+/* ===== Stage 6.4：大地图镜头与移动轮盘自定义位置 ===== */
+.mobile-joystick {
+  transform: translate(-50%, -50%);
+  cursor: grab;
+}
+.mobile-joystick.is-editing {
+  z-index: 9;
+  border-color: rgba(243, 223, 168, .92);
+  box-shadow: 0 0 0 5px rgba(232,200,122,.12), 0 0 28px rgba(232,200,122,.35), inset 0 0 22px rgba(232,200,122,.12);
+  cursor: grabbing;
+}
+.joystick-position-editor {
+  display: none;
+  padding: 17px 0 5px;
+  border-bottom: 1px solid rgba(232,200,122,.13);
+}
+.joystick-editor-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.joystick-editor-heading > div {
+  display: grid;
+  gap: 5px;
+}
+.joystick-editor-heading strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+}
+.joystick-editor-heading small,
+.joystick-editor-note {
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+.joystick-preview-area {
+  position: relative;
+  width: min(100%, 430px);
+  aspect-ratio: 16 / 7;
+  margin: 13px auto 8px;
+  overflow: hidden;
+  border: 1px solid rgba(232,200,122,.32);
+  border-radius: 13px;
+  background:
+    linear-gradient(rgba(109,165,201,.10) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(109,165,201,.10) 1px, transparent 1px),
+    radial-gradient(ellipse at center, rgba(29,64,91,.88), rgba(7,17,31,.98));
+  background-size: 28px 28px, 28px 28px, auto;
+  touch-action: none;
+  user-select: none;
+}
+.joystick-preview-label {
+  position: absolute;
+  top: 9px;
+  left: 11px;
+  color: rgba(215,225,238,.58);
+  font-size: 9px;
+  letter-spacing: .1em;
+  pointer-events: none;
+}
+.joystick-preview-control {
+  position: absolute;
+  top: 78%;
+  left: 86%;
+  display: grid;
+  width: 72px;
+  height: 72px;
+  place-items: center;
+  border: 1px solid rgba(232,200,122,.72);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(24,47,73,.50), rgba(5,14,28,.82));
+  box-shadow: 0 0 22px rgba(112,200,232,.22), inset 0 0 18px rgba(162,205,240,.12);
+  transform: translate(-50%, -50%);
+  touch-action: none;
+  cursor: grab;
+}
+.joystick-preview-control::before {
+  position: absolute;
+  inset: 10px;
+  border: 1px dashed rgba(205,224,244,.42);
+  border-radius: 50%;
+  content: "";
+  pointer-events: none;
+}
+.joystick-preview-control span {
+  width: 29px;
+  height: 29px;
+  border: 1px solid rgba(255,255,255,.68);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 28%, rgba(235,248,255,.9), rgba(117,166,207,.62) 42%, rgba(33,65,101,.9));
+  box-shadow: 0 0 13px rgba(112,200,232,.3);
+  pointer-events: none;
+}
+.joystick-editor-note {
+  display: block;
+  text-align: center;
+}
+@media (pointer: coarse), (max-width: 900px) {
+  .joystick-position-editor { display: block; }
+}
+@media (pointer: coarse), (max-width: 900px) {
+  body.mobile-site-mode .game-screen .arena-help { display: none; }
+}

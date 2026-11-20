@@ -16,7 +16,8 @@
         "hudLevel", "hudExpText", "expFill", "hudGold", "hudWave", "hudKills", "hudTime", "hudBuffs",
         "resultTime", "resultKills", "resultLevel", "resultExperience", "resultGold", "resultTotalGold",
         "upgradeModal", "upgradeCards", "shopModal", "shopCards", "shopGold", "prestigeModal",
-        "prestigeInfo", "offlineModal", "offlineInfo", "upgradeTitle", "upgradeSubtitle", "confirmPrestige"
+        "prestigeInfo", "offlineModal", "offlineInfo", "upgradeTitle", "upgradeSubtitle", "confirmPrestige",
+        "joystickPreviewArea", "joystickPreviewControl"
       ];
       ids.forEach(id => { this.elements[id] = document.getElementById(id); });
 
@@ -34,6 +35,7 @@
       document.addEventListener("click", event => this.handleClick(event));
       document.addEventListener("keydown", event => this.handleKeydown(event));
       this.bindSettings();
+      this.bindJoystickPreview();
       this.refreshSettings();
       this.refreshMenu();
 
@@ -65,6 +67,7 @@
         case "retry": this.retryRun(); break;
         case "settlement-menu": this.returnToMenu(); break;
         case "reset-save": this.resetSave(); break;
+        case "reset-joystick-position": this.resetJoystickPosition(); break;
         case "upgrade-card": this.chooseUpgrade(Number(action.dataset.index)); break;
         case "buy-upgrade": this.buyUpgrade(action.dataset.key); break;
       }
@@ -366,6 +369,65 @@
       global.FantasySurvivor.Audio.setVolume(settings.masterVolume / 100);
       global.FantasySurvivor.Game.setParticlesEnabled(settings.particles);
       global.FantasySurvivor.Game.setScreenShakeEnabled(settings.screenShake);
+      this.applyJoystickPosition(settings.joystickPosition || { x: 0.86, y: 0.78 }, false);
+    },
+
+    bindJoystickPreview() {
+      const area = this.elements.joystickPreviewArea;
+      const control = this.elements.joystickPreviewControl;
+      if (!area || !control) return;
+      let pointerId = null;
+      const update = (event) => {
+        const rect = area.getBoundingClientRect();
+        const knobRect = control.getBoundingClientRect();
+        const halfW = knobRect.width / 2 + 3;
+        const halfH = knobRect.height / 2 + 3;
+        const px = Math.max(halfW, Math.min(rect.width - halfW, event.clientX - rect.left));
+        const py = Math.max(halfH, Math.min(rect.height - halfH, event.clientY - rect.top));
+        this.applyJoystickPosition({ x: px / rect.width, y: py / rect.height }, false);
+      };
+      control.addEventListener("pointerdown", (event) => {
+        pointerId = event.pointerId;
+        if (control.setPointerCapture) control.setPointerCapture(pointerId);
+        update(event);
+        event.preventDefault();
+      });
+      control.addEventListener("pointermove", (event) => {
+        if (pointerId !== event.pointerId) return;
+        update(event);
+        event.preventDefault();
+      });
+      const release = (event) => {
+        if (pointerId !== event.pointerId) return;
+        pointerId = null;
+        this.saveData.settings.joystickPosition = { ...this.pendingJoystickPosition };
+        this.persist();
+        event.preventDefault();
+      };
+      control.addEventListener("pointerup", release);
+      control.addEventListener("pointercancel", release);
+    },
+
+    applyJoystickPosition(position, persist = false) {
+      const rawX = Number(position && position.x);
+      const rawY = Number(position && position.y);
+      const x = Math.max(0.08, Math.min(0.92, Number.isFinite(rawX) ? rawX : 0.86));
+      const y = Math.max(0.10, Math.min(0.90, Number.isFinite(rawY) ? rawY : 0.78));
+      this.pendingJoystickPosition = { x, y };
+      const control = this.elements.joystickPreviewControl;
+      if (control) {
+        control.style.left = `${x * 100}%`;
+        control.style.top = `${y * 100}%`;
+      }
+      global.FantasySurvivor.Game.setJoystickPosition(this.pendingJoystickPosition);
+      if (persist) {
+        this.saveData.settings.joystickPosition = { x, y };
+        this.persist();
+      }
+    },
+
+    resetJoystickPosition() {
+      this.applyJoystickPosition({ x: 0.86, y: 0.78 }, true);
     },
 
     persist() {

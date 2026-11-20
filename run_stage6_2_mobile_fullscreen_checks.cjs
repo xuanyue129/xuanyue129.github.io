@@ -12,7 +12,7 @@ const checks = [
   ['mobile footer is hidden for viewport use', /body\.mobile-site-mode \.site-footer/.test(css)],
   ['mobile main region consumes viewport', /body\.mobile-site-mode main[\s\S]*?height:\s*100%/.test(css)],
   ['mobile joystick right position is applied', /body\.mobile-site-mode \.mobile-joystick[\s\S]*?right:\s*max\(/.test(css)],
-  ['joystick no longer advertises left-side control', /手机使用右下摇杆/.test(html)],
+  ['joystick hint describes customizable positioning', /手机使用可自定义位置的轮盘/.test(html)],
   ['fullscreen remains tied to start interaction', /enterMobileImmersiveMode\(\)/.test(read('js/ui.js')) && /requestFullscreen/.test(read('js/ui.js'))],
   ['viewport resize triggers canvas refresh', /addEventListener\('resize', refreshViewport/.test(main)]
 ];

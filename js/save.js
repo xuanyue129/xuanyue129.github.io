@@ -3,7 +3,7 @@
   "use strict";
   const STORAGE_KEY = "fantasy-survivor-save-v1";
   const BACKUP_KEY = "fantasy-survivor-save-backup-v1";
-  const VERSION = 3;
+  const VERSION = 4;
   const OFFLINE = Object.freeze({ maxHours: 8, baseGoldPerHour: 3, waveBonusPerHour: 1.25, maxGold: 180 });
   const clamp = (v, min, max, fallback) => {
     const n = Number(v); return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
@@ -14,7 +14,7 @@
       gold: 0, shards: 0, prestigeCount: 0,
       permanentUpgrades: { maxHp: 0, damage: 0, goldRate: 0, expRate: 0 },
       stats: { lifetimeKills: 0, bestSurvivalSeconds: 0, bestLevel: 1, bestWave: 1 },
-      settings: { masterVolume: 70, particles: true, screenShake: true }
+      settings: { masterVolume: 70, particles: true, screenShake: true, joystickPosition: { x: 0.86, y: 0.78 } }
     };
   }
   function migrate(data) {
@@ -32,6 +32,11 @@
       upgrades.maxHp = Math.min(10, Math.floor((Number(upgrades.maxHp) || 0) / 3));
       d = { ...d, permanentUpgrades: upgrades, version: 3, schemaVersion: 3 };
     }
+    if (oldVersion < 4) {
+      const settings = { ...(d.settings || {}) };
+      settings.joystickPosition = settings.joystickPosition || { x: 0.86, y: 0.78 };
+      d = { ...d, settings, version: 4, schemaVersion: 4 };
+    }
     return d;
   }
   function normalize(data) {
@@ -43,7 +48,13 @@
       prestigeCount: clamp(d.prestigeCount, 0, 1e9, 0),
       permanentUpgrades: { maxHp: clamp(up.maxHp,0,10,0), damage: clamp(up.damage,0,1000,0), goldRate: clamp(up.goldRate,0,1000,0), expRate: clamp(up.expRate,0,1000,0) },
       stats: { ...base.stats, ...st, lifetimeKills: clamp(st.lifetimeKills,0,1e12,0), bestSurvivalSeconds: clamp(st.bestSurvivalSeconds,0,1e9,0), bestLevel: clamp(st.bestLevel,1,1e6,1), bestWave: clamp(st.bestWave,1,1e6,1) },
-      settings: { masterVolume: clamp(s.masterVolume,0,100,70), particles: s.particles !== false, screenShake: s.screenShake !== false },
+      settings: {
+        masterVolume: clamp(s.masterVolume,0,100,70), particles: s.particles !== false, screenShake: s.screenShake !== false,
+        joystickPosition: {
+          x: clamp(s.joystickPosition && s.joystickPosition.x, 0.08, 0.92, 0.86),
+          y: clamp(s.joystickPosition && s.joystickPosition.y, 0.10, 0.90, 0.78)
+        }
+      },
       lastSeenAt: clamp(d.lastSeenAt,0,Date.now(),Date.now()), updatedAt: clamp(d.updatedAt,0,Date.now(),Date.now())
     };
   }

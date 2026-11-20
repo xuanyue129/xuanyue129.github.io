@@ -45,7 +45,7 @@
         app.Save.save(app.UI.saveData);
       }
     });
-    console.info('[米饭的自我救赎] 全视口手机布局与右侧摇杆已就绪。');
+    console.info('[米饭的自我救赎] 大地图摄像机、角色跟随与可自定义移动轮盘已就绪。');
   }
 
   if (document.readyState === 'loading') {

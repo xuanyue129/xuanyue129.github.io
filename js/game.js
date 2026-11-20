@@ -57,7 +57,24 @@
     grid: {
       cellSize: 120
     },
-    progression: { goldPerLevel: 1, expPerLevel: 1 }
+    progression: { goldPerLevel: 1, expPerLevel: 1 },
+    boss: {
+      firstLevel: 10,
+      levelInterval: 10,
+      baseHp: 700,
+      hpPerLevel: 90,
+      radius: 46,
+      speed: 46,
+      contactDamage: 12,
+      attackInterval: 2.25,
+      chargeTell: 0.82,
+      chargeSpeed: 690,
+      chargeDistance: 760,
+      barrierTell: 0.9,
+      barrierDuration: 3.4,
+      barrierCooldown: 0.75,
+      summonCount: 3
+    }
   });
 
   const THEME_COLOR = "#70C8E8";
@@ -74,6 +91,12 @@
     height: 0,
     arenaWidth: 0,
     arenaHeight: 0,
+    viewWidth: 0,
+    viewHeight: 0,
+    cameraZoom: 1,
+    cameraX: 0,
+    cameraY: 0,
+    worldScale: 4.2,
 
     stars: [],
     motes: [],
@@ -84,12 +107,19 @@
     vortices: [],
     enemyGrid: new Map(),
     nextEnemyId: 1,
+    boss: null,
+    bossActive: false,
+    bossQueue: [],
+    bossBarriers: [],
+    bossAnnouncement: "",
+    bossAnnouncementTimer: 0,
 
     player: null,
     keys: new Set(),
     joystickElement: null,
     joystickKnob: null,
     joystickPointerId: null,
+    joystickPosition: { x: 0.86, y: 0.78 },
     touchMoveX: 0,
     touchMoveY: 0,
 
@@ -208,6 +238,26 @@
       element.addEventListener("lostpointercapture", release);
     },
 
+    setJoystickPosition(position) {
+      const rawX = Number(position && position.x);
+      const rawY = Number(position && position.y);
+      const x = Math.max(0.08, Math.min(0.92, Number.isFinite(rawX) ? rawX : 0.86));
+      const y = Math.max(0.10, Math.min(0.90, Number.isFinite(rawY) ? rawY : 0.78));
+      this.joystickPosition = { x, y };
+      this.applyJoystickPosition();
+      return this.joystickPosition;
+    },
+
+    applyJoystickPosition() {
+      const element = this.joystickElement;
+      if (!element) return;
+      element.style.left = `${this.joystickPosition.x * 100}%`;
+      element.style.top = `${this.joystickPosition.y * 100}%`;
+      element.style.right = "auto";
+      element.style.bottom = "auto";
+      element.style.transform = "translate(-50%, -50%)";
+    },
+
     resetJoystick() {
       this.joystickPointerId = null;
       this.touchMoveX = 0;
@@ -246,10 +296,30 @@
 
       const arena = this.resizeCanvas(this.arenaCanvas, this.arenaContext);
       if (arena) {
-        this.arenaWidth = arena.width;
-        this.arenaHeight = arena.height;
-        if (this.player) this.keepPlayerInBounds();
+        this.viewWidth = arena.width;
+        this.viewHeight = arena.height;
+        const mobile = (global.matchMedia && global.matchMedia("(pointer: coarse), (max-width: 900px)").matches) || this.viewWidth <= 900;
+        // 手机上缩小镜头倍率，减少角色与怪物占屏比例，扩大可视范围。
+        this.cameraZoom = mobile ? 0.66 : 0.84;
+        this.arenaWidth = Math.max(this.viewWidth / this.cameraZoom * this.worldScale, 2200);
+        this.arenaHeight = Math.max(this.viewHeight / this.cameraZoom * this.worldScale, 1600);
+        if (this.player) {
+          this.keepPlayerInBounds();
+          this.updateCamera();
+        } else {
+          this.cameraX = Math.max(0, (this.arenaWidth - this.viewWidth / this.cameraZoom) / 2);
+          this.cameraY = Math.max(0, (this.arenaHeight - this.viewHeight / this.cameraZoom) / 2);
+        }
+        this.applyJoystickPosition();
       }
+    },
+
+    updateCamera() {
+      if (!this.player || !this.viewWidth || !this.viewHeight) return;
+      const visibleWidth = this.viewWidth / this.cameraZoom;
+      const visibleHeight = this.viewHeight / this.cameraZoom;
+      this.cameraX = Math.max(0, Math.min(this.arenaWidth - visibleWidth, this.player.x - visibleWidth / 2));
+      this.cameraY = Math.max(0, Math.min(this.arenaHeight - visibleHeight, this.player.y - visibleHeight / 2));
     },
 
     makeStars() {
@@ -271,6 +341,11 @@
     },
 
     handleKeyDown(event) {
+      if (event.code === "KeyJ" && this.inRun && this.active && !this.paused && !event.repeat) {
+        event.preventDefault();
+        this.cheatClearScreen();
+        return;
+      }
       if (!this.active || this.paused) return;
       const supported = [
         "KeyW", "KeyA", "KeyS", "KeyD",
@@ -300,6 +375,12 @@
       this.runGold = 0;
       this.runExperience = 0;
       this.pendingLevelUps = 0;
+      this.boss = null;
+      this.bossActive = false;
+      this.bossQueue = [];
+      this.bossBarriers.length = 0;
+      this.bossAnnouncement = "";
+      this.bossAnnouncementTimer = 0;
       this.shakeTime = 0;
       this.shakeStrength = 0;
       this.keys.clear();
@@ -342,20 +423,22 @@
         petCharges: [],
         vortexUnlocked: false, vortexShotCounter: 0, vortexShotsPerSummon: 8,
         vortexCount: 1, vortexDamage: 8, vortexRadius: 102,
-        vortexDuration: 3.6, vortexPullStrength: 190,
+        vortexDuration: 1.0, vortexPullStrength: 190,
         fortuneUnlocked: false,
         fortuneDamage: 7,
         fortuneRadius: 100,
-        fortuneAuraDuration: 4.2,
+        fortuneAuraDuration: 1.0,
         fortuneAuraTimer: 0,
         fortuneKillHealEvery: Infinity,
         fortuneKillCounter: 0,
         fortuneRegenInterval: Infinity,
         fortuneRegenTimer: 0,
+        bossBarrierCooldown: 0,
         goldMultiplier: 1 + (permanent.goldRate || 0) * 0.08,
         expMultiplier: 1 + (permanent.expRate || 0) * 0.07,
         globalMultiplier: shardMultiplier
       });
+      this.updateCamera();
 
       this.lastTime = performance.now();
       this.updateHUD(true);
@@ -400,6 +483,12 @@
       this.vortices.length = 0;
       this.enemyGrid.clear();
       this.nextEnemyId = 1;
+      this.boss = null;
+      this.bossActive = false;
+      this.bossQueue = [];
+      this.bossBarriers.length = 0;
+      this.bossAnnouncement = "";
+      this.bossAnnouncementTimer = 0;
     },
 
     setParticlesEnabled(value) {
@@ -434,9 +523,12 @@
       const wave = this.getWave();
       this.player.invuln = Math.max(0, this.player.invuln - dt);
       this.player.hitFlash = Math.max(0, this.player.hitFlash - dt);
+      this.player.bossBarrierCooldown = Math.max(0, (this.player.bossBarrierCooldown || 0) - dt);
       this.shakeTime = Math.max(0, this.shakeTime - dt);
+      this.bossAnnouncementTimer = Math.max(0, this.bossAnnouncementTimer - dt);
       this.updatePlayerMovement(dt);
       this.updateEnemies(dt, wave);
+      this.updateBossBarriers(dt);
       this.updateVortices(dt);
       this.updateFortuneAura(dt);
       this.updateFortuneTimedHealing(dt);
@@ -487,6 +579,7 @@
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       this.keepPlayerInBounds();
+      this.updateCamera();
     },
 
     keepPlayerInBounds() {
@@ -497,27 +590,33 @@
     },
 
     updateEnemies(dt, wave) {
-      this.spawnTimer -= dt;
-      if (this.spawnTimer <= 0 && this.enemies.length < CONFIG.spawn.maxEnemies) {
-        this.spawnEnemy(wave);
-        const interval = Math.max(
-          CONFIG.spawn.minimumInterval,
-          CONFIG.spawn.initialInterval - (wave - 1) * CONFIG.spawn.intervalDecreasePerWave
-        );
-        this.spawnTimer = interval * (0.86 + Math.random() * 0.28);
+      if (!this.bossActive) {
+        this.spawnTimer -= dt;
+        if (this.spawnTimer <= 0 && this.enemies.length < CONFIG.spawn.maxEnemies) {
+          this.spawnEnemy(wave);
+          const interval = Math.max(
+            CONFIG.spawn.minimumInterval,
+            CONFIG.spawn.initialInterval - (wave - 1) * CONFIG.spawn.intervalDecreasePerWave
+          );
+          this.spawnTimer = interval * (0.86 + Math.random() * 0.28);
+        }
       }
 
       const p = this.player;
       for (let i = this.enemies.length - 1; i >= 0; i -= 1) {
         const enemy = this.enemies[i];
         if (enemy.dead) continue;
-
         enemy.flash = Math.max(0, enemy.flash - dt);
         enemy.contactCooldown = Math.max(0, enemy.contactCooldown - dt);
+
+        if (enemy.isBoss) {
+          this.updateBossEnemy(enemy, dt);
+          continue;
+        }
+
         const vx = p.x - enemy.x;
         const vy = p.y - enemy.y;
         const distance = Math.hypot(vx, vy) || 1;
-
         enemy.vx = (vx / distance) * enemy.speed;
         enemy.vy = (vy / distance) * enemy.speed;
         enemy.x += enemy.vx * dt;
@@ -537,6 +636,230 @@
       }
     },
 
+    queueBossForLevel(level) {
+      if (!Number.isFinite(level) || level < CONFIG.boss.firstLevel || level % CONFIG.boss.levelInterval !== 0) return;
+      if (this.bossQueue.includes(level) || (this.boss && this.boss.bossLevel === level)) return;
+      this.bossQueue.push(level);
+      this.bossQueue.sort((a, b) => a - b);
+      if (!this.bossActive) this.startNextBoss();
+    },
+
+    startNextBoss() {
+      if (this.bossActive || !this.bossQueue.length || !this.player) return;
+      const level = this.bossQueue.shift();
+      const entities = global.FantasySurvivor.Entities;
+
+      // Boss 入场时清空所有普通小怪及旧战斗投射物，战斗期间暂停普通刷怪。
+      this.enemies.forEach(enemy => entities.release("enemy", enemy));
+      this.enemies.length = 0;
+      this.projectiles.forEach(shot => entities.release("projectile", shot));
+      this.projectiles.length = 0;
+      this.enemyGrid.clear();
+      this.bossBarriers.length = 0;
+
+      const waveScale = 1 + (this.getWave() - 1) * 0.14;
+      const hp = Math.round((CONFIG.boss.baseHp + level * CONFIG.boss.hpPerLevel) * waveScale);
+      const visibleWidth = this.viewWidth / this.cameraZoom;
+      const visibleHeight = this.viewHeight / this.cameraZoom;
+      const x = Math.max(CONFIG.boss.radius + 12, Math.min(this.arenaWidth - CONFIG.boss.radius - 12, this.player.x + (Math.random() - 0.5) * visibleWidth * 0.38));
+      const y = Math.max(CONFIG.boss.radius + 18, Math.min(this.arenaHeight - CONFIG.boss.radius - 18, this.player.y - visibleHeight * 0.28));
+      const boss = entities.acquire("enemy", {
+        id: this.nextEnemyId++, isBoss: true, bossLevel: level,
+        x, y, hp, maxHp: hp, speed: CONFIG.boss.speed + level * 0.65,
+        damage: CONFIG.boss.contactDamage, radius: CONFIG.boss.radius,
+        kind: "boss", color: "#8D58D8", flash: 0, contactCooldown: 0,
+        dead: false, bossMode: "idle", bossModeTimer: 0,
+        bossAttackTimer: CONFIG.boss.attackInterval, bossNextAttack: 0,
+        chargeDirX: 0, chargeDirY: 0, chargeRemaining: 0,
+        chargeHit: false, barrierCooldown: 0
+      });
+      this.enemies.push(boss);
+      this.boss = boss;
+      this.bossActive = true;
+      this.spawnTimer = 999999;
+      this.bossAnnouncement = `BOSS 来袭 · Lv.${level}`;
+      this.bossAnnouncementTimer = 2.4;
+      this.spawnBurst(boss.x, boss.y, "#C9A2FF", 42, 190);
+      this.updateHUD(true);
+    },
+
+    updateBossEnemy(boss, dt) {
+      const p = this.player;
+      if (!p || boss.dead) return;
+
+      if (boss.bossMode === "chargeTell") {
+        boss.bossModeTimer -= dt;
+        if (boss.bossModeTimer <= 0) {
+          boss.bossMode = "charge";
+          boss.chargeRemaining = Math.max(CONFIG.boss.chargeDistance, Math.hypot(this.viewWidth, this.viewHeight) / this.cameraZoom * 1.2);
+          boss.chargeHit = false;
+        }
+        return;
+      }
+
+      if (boss.bossMode === "charge") {
+        const step = Math.min(boss.chargeRemaining, CONFIG.boss.chargeSpeed * dt);
+        const oldX = boss.x;
+        const oldY = boss.y;
+        boss.x += boss.chargeDirX * step;
+        boss.y += boss.chargeDirY * step;
+        boss.chargeRemaining -= step;
+        if (!boss.chargeHit) {
+          const hitRadius = boss.radius + p.radius + 3;
+          if (this.distancePointToSegmentSquared(p.x, p.y, oldX, oldY, boss.x, boss.y) <= hitRadius * hitRadius) {
+            this.damagePlayer(boss.damage + 5);
+            boss.chargeHit = true;
+          }
+        }
+        if (boss.chargeRemaining <= 0 || boss.x < -boss.radius || boss.y < -boss.radius || boss.x > this.arenaWidth + boss.radius || boss.y > this.arenaHeight + boss.radius) {
+          boss.bossMode = "idle";
+          boss.bossAttackTimer = 1.05;
+          boss.x = Math.max(boss.radius, Math.min(this.arenaWidth - boss.radius, boss.x));
+          boss.y = Math.max(boss.radius, Math.min(this.arenaHeight - boss.radius, boss.y));
+        }
+        return;
+      }
+
+      // Boss 闲置时缓慢追踪玩家，保留走位空间。
+      const dx = p.x - boss.x;
+      const dy = p.y - boss.y;
+      const distance = Math.hypot(dx, dy) || 1;
+      if (distance > 155) {
+        boss.x += dx / distance * boss.speed * 0.52 * dt;
+        boss.y += dy / distance * boss.speed * 0.52 * dt;
+      }
+      const contactDistance = p.radius + boss.radius;
+      const currentDistance = Math.hypot(p.x - boss.x, p.y - boss.y);
+      if (currentDistance < contactDistance && boss.contactCooldown <= 0) {
+        boss.contactCooldown = 0.9;
+        this.damagePlayer(boss.damage);
+      }
+
+      boss.bossAttackTimer -= dt;
+      if (boss.bossAttackTimer > 0) return;
+      const pattern = boss.bossNextAttack % 3;
+      boss.bossNextAttack += 1;
+      if (pattern === 0) {
+        const aimX = p.x - boss.x;
+        const aimY = p.y - boss.y;
+        const aimLength = Math.hypot(aimX, aimY) || 1;
+        boss.chargeDirX = aimX / aimLength;
+        boss.chargeDirY = aimY / aimLength;
+        boss.bossMode = "chargeTell";
+        boss.bossModeTimer = CONFIG.boss.chargeTell;
+        this.bossAnnouncement = "警告：Boss 即将冲撞";
+        this.bossAnnouncementTimer = CONFIG.boss.chargeTell;
+      } else if (pattern === 1) {
+        this.spawnBossBarrier();
+        boss.bossAttackTimer = CONFIG.boss.barrierTell + CONFIG.boss.barrierDuration + 0.6;
+      } else {
+        this.spawnBossMinions(boss);
+        boss.bossAttackTimer = 2.0;
+      }
+    },
+
+    spawnBossBarrier() {
+      const p = this.player;
+      const left = this.cameraX;
+      const top = this.cameraY;
+      const w = this.viewWidth / this.cameraZoom;
+      const h = this.viewHeight / this.cameraZoom;
+      const vertical = Math.random() < 0.5;
+      let x1, y1, x2, y2;
+      if (vertical) {
+        const offset = (Math.random() < 0.5 ? -1 : 1) * Math.max(80, w * (0.13 + Math.random() * 0.13));
+        const x = Math.max(left + 24, Math.min(left + w - 24, p.x + offset));
+        x1 = x; y1 = top + 12; x2 = x; y2 = top + h - 12;
+      } else {
+        const offset = (Math.random() < 0.5 ? -1 : 1) * Math.max(70, h * (0.18 + Math.random() * 0.14));
+        const y = Math.max(top + 24, Math.min(top + h - 24, p.y + offset));
+        x1 = left + 12; y1 = y; x2 = left + w - 12; y2 = y;
+      }
+      this.bossBarriers.push({ x1, y1, x2, y2, phase: "warning", timer: CONFIG.boss.barrierTell, activeDuration: CONFIG.boss.barrierDuration, hitCooldown: 0 });
+      this.bossAnnouncement = "警告：带电屏障形成";
+      this.bossAnnouncementTimer = CONFIG.boss.barrierTell;
+    },
+
+    updateBossBarriers(dt) {
+      if (!this.bossBarriers.length) return;
+      const p = this.player;
+      for (let i = this.bossBarriers.length - 1; i >= 0; i -= 1) {
+        const barrier = this.bossBarriers[i];
+        barrier.timer -= dt;
+        if (barrier.phase === "warning" && barrier.timer <= 0) {
+          barrier.phase = "active";
+          barrier.timer = barrier.activeDuration;
+        } else if (barrier.phase === "active") {
+          barrier.hitCooldown = Math.max(0, barrier.hitCooldown - dt);
+          const distanceSq = this.distancePointToSegmentSquared(p.x, p.y, barrier.x1, barrier.y1, barrier.x2, barrier.y2);
+          if (distanceSq <= (p.radius + 9) ** 2 && barrier.hitCooldown <= 0) {
+            this.damagePlayer(1);
+            barrier.hitCooldown = CONFIG.boss.barrierCooldown;
+          }
+          if (barrier.timer <= 0) this.bossBarriers.splice(i, 1);
+        }
+      }
+    },
+
+    spawnBossMinions(boss) {
+      const entities = global.FantasySurvivor.Entities;
+      const waveScale = 1 + (this.getWave() - 1) * 0.12;
+      for (let i = 0; i < CONFIG.boss.summonCount; i += 1) {
+        const angle = Math.PI * 2 * i / CONFIG.boss.summonCount + this.elapsed;
+        const x = Math.max(22, Math.min(this.arenaWidth - 22, boss.x + Math.cos(angle) * 78));
+        const y = Math.max(22, Math.min(this.arenaHeight - 22, boss.y + Math.sin(angle) * 78));
+        const baseSpeed = CONFIG.enemy.eliteSpeed + (this.getWave() - 1) * 1.5;
+        const hp = Math.round(CONFIG.enemy.eliteHp * waveScale * 0.8);
+        this.enemies.push(entities.acquire("enemy", {
+          id: this.nextEnemyId++, isBossMinion: true,
+          x, y, hp, maxHp: hp, speed: baseSpeed * 2,
+          damage: CONFIG.enemy.eliteDamage * waveScale,
+          radius: 14, kind: "bossElite", color: "#B56BFF",
+          contactCooldown: 0, flash: 0, dead: false
+        }));
+      }
+      this.bossAnnouncement = "Boss 召唤了 3 只紫色精英";
+      this.bossAnnouncementTimer = 1.9;
+      this.spawnBurst(boss.x, boss.y, "#B66CFF", 26, 145);
+    },
+
+    killBoss(boss) {
+      if (!boss || boss.dead) return;
+      boss.dead = true;
+      this.runKills += 1;
+      this.spawnBurst(boss.x, boss.y, "#D3B4FF", 64, 230);
+      this.spawnDrop(boss.x, boss.y, "exp", Math.max(35, Math.floor(boss.bossLevel * 5)));
+      this.spawnDrop(boss.x + 22, boss.y, "gold", 35 + boss.bossLevel);
+      // Boss 召唤的小怪随 Boss 一同退场，普通刷怪随后恢复。
+      for (const enemy of this.enemies) {
+        if (enemy !== boss && enemy.isBossMinion && !enemy.dead) {
+          enemy.dead = true;
+          this.runKills += 1;
+        }
+      }
+      this.boss = null;
+      this.bossActive = false;
+      this.bossBarriers.length = 0;
+      this.bossAnnouncement = "Boss 已击败！继续冒险";
+      this.bossAnnouncementTimer = 2.4;
+      this.spawnTimer = 1.0;
+      this.updateHUD(true);
+      if (this.bossQueue.length) this.startNextBoss();
+    },
+
+    cheatClearScreen() {
+      if (!this.inRun || !this.active || this.paused) return false;
+      const targets = this.enemies.slice();
+      for (const enemy of targets) {
+        if (!enemy.dead) this.damageEnemy(enemy, enemy.hp + 1, true);
+      }
+      this.bossBarriers.length = 0;
+      this.bossAnnouncement = "开发作弊：清屏秒杀";
+      this.bossAnnouncementTimer = 1.6;
+      this.updateHUD(true);
+      return true;
+    },
+
     spawnEnemy(wave) {
       const entities = global.FantasySurvivor.Entities;
       const w = this.arenaWidth;
@@ -545,13 +868,19 @@
 
       const side = Math.floor(Math.random() * 4);
       const pad = CONFIG.spawn.edgePadding;
+      const visibleWidth = this.viewWidth / this.cameraZoom;
+      const visibleHeight = this.viewHeight / this.cameraZoom;
+      const left = this.cameraX;
+      const top = this.cameraY;
       let x;
       let y;
 
-      if (side === 0) { x = Math.random() * w; y = -pad; }
-      else if (side === 1) { x = w + pad; y = Math.random() * h; }
-      else if (side === 2) { x = Math.random() * w; y = h + pad; }
-      else { x = -pad; y = Math.random() * h; }
+      if (side === 0) { x = left + Math.random() * visibleWidth; y = top - pad; }
+      else if (side === 1) { x = left + visibleWidth + pad; y = top + Math.random() * visibleHeight; }
+      else if (side === 2) { x = left + Math.random() * visibleWidth; y = top + visibleHeight + pad; }
+      else { x = left - pad; y = top + Math.random() * visibleHeight; }
+      x = Math.max(8, Math.min(w - 8, x));
+      y = Math.max(8, Math.min(h - 8, y));
 
       const roll = Math.random();
       let kind = "normal";
@@ -605,7 +934,7 @@
 
     // 逐对推开相交的敌人。多轮松弛可处理一大群敌人挤在同一位置的情况。
     separateEnemyBodies(iterations = 8) {
-      const active = this.enemies.filter(enemy => !enemy.dead);
+      const active = this.enemies.filter(enemy => !enemy.dead && !enemy.isBoss);
       if (active.length < 2) return;
       const passes = Math.max(1, Math.min(80, iterations | 0));
       for (let pass = 0; pass < passes; pass += 1) {
@@ -1002,6 +1331,10 @@
 
     killEnemy(enemy) {
       if (enemy.dead) return;
+      if (enemy.isBoss) {
+        this.killBoss(enemy);
+        return;
+      }
       enemy.dead = true;
       this.runKills += 1;
       const p = this.player;
@@ -1102,6 +1435,7 @@
         p.exp -= this.expToNextLevel(p.level);
         p.level += 1;
         this.pendingLevelUps += 1;
+        this.queueBossForLevel(p.level);
       }
       this.updateHUD(true);
       if (this.pendingLevelUps > 0 && !this.paused) {
@@ -1133,7 +1467,9 @@
 
     damagePlayer(amount) {
       const p = this.player;
-      if (!p || p.invuln > 0 || !this.active) return;
+      if (!p || p.invuln > 0 || !this.active) return false;
+      // 气运反噬的持续期间完全无敌，碰撞、电墙与冲撞都无法扣心。
+      if (p.fortuneUnlocked && p.fortuneAuraTimer > 0) return false;
       // 生命值按整颗心计数：每次有效受击固定扣除 1 颗心。
       p.hp = Math.max(0, Math.floor(p.hp) - 1);
       p.invuln = CONFIG.player.invulnerability;
@@ -1148,6 +1484,7 @@
         this.callbacks.onPlayerHit(p.hp, p.maxHp);
       }
       this.updateHUD(true);
+      return true;
     },
 
     spawnBurst(x, y, color, count, speed) {
@@ -1211,7 +1548,11 @@
         kills: this.runKills,
         wave: this.getWave(),
         time: this.elapsed,
-        buffs: this.player.buffCount || 0
+        buffs: this.player.buffCount || 0,
+        bossActive: Boolean(this.bossActive),
+        bossLevel: this.boss ? this.boss.bossLevel : 0,
+        bossHp: this.boss ? this.boss.hp : 0,
+        bossMaxHp: this.boss ? this.boss.maxHp : 0
       });
     },
 
@@ -1317,49 +1658,65 @@
 
     renderArena(time) {
       const ctx = this.arenaContext;
-      const w = this.arenaWidth;
-      const h = this.arenaHeight;
-      if (!ctx || !w || !h) return;
+      const viewW = this.viewWidth || this.arenaWidth;
+      const viewH = this.viewHeight || this.arenaHeight;
+      const worldW = this.arenaWidth;
+      const worldH = this.arenaHeight;
+      if (!ctx || !viewW || !viewH || !worldW || !worldH) return;
 
-      ctx.clearRect(0, 0, w, h);
+      ctx.clearRect(0, 0, viewW, viewH);
       ctx.save();
       if (this.shakeTime > 0 && this.screenShakeEnabled) {
         const strength = this.shakeStrength * (this.shakeTime / 0.16);
         ctx.translate((Math.random() - 0.5) * strength, (Math.random() - 0.5) * strength);
       }
 
-      const bg = ctx.createRadialGradient(w * 0.5, h * 0.48, 10, w * 0.5, h * 0.48, Math.max(w, h) * 0.72);
+      // 固定在屏幕上的地面底色，世界物件则由摄像机变换绘制。
+      const bg = ctx.createRadialGradient(viewW * 0.5, viewH * 0.46, 10, viewW * 0.5, viewH * 0.46, Math.max(viewW, viewH) * 0.86);
       bg.addColorStop(0, "#1C3B56");
       bg.addColorStop(0.55, "#10263E");
       bg.addColorStop(1, "#081525");
       ctx.fillStyle = bg;
-      ctx.fillRect(0, 0, w, h);
+      ctx.fillRect(0, 0, viewW, viewH);
 
+      const visibleLeft = this.cameraX;
+      const visibleTop = this.cameraY;
       ctx.save();
-      ctx.translate(w / 2, h / 2);
-      ctx.strokeStyle = "rgba(132, 174, 193, 0.09)";
-      ctx.lineWidth = 1;
-      for (let r = 60; r < Math.max(w, h); r += 60) {
-        ctx.beginPath();
-        ctx.ellipse(0, 0, r * 1.38, r * 0.72, 0, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = "rgba(232, 200, 122, 0.14)";
-      ctx.setLineDash([3, 10]);
+      // 直接使用已限制在地图边界内的相机左上角；靠近地图边缘时不再把世界外区域卷入画面。
+      ctx.translate(-this.cameraX * this.cameraZoom, -this.cameraY * this.cameraZoom);
+      ctx.scale(this.cameraZoom, this.cameraZoom);
+
+      // 以世界坐标绘制网格和明确的地图边界，地图不会无限延伸。
+      const grid = 180;
+      ctx.strokeStyle = "rgba(132, 174, 193, 0.075)";
+      ctx.lineWidth = 1 / this.cameraZoom;
       ctx.beginPath();
-      ctx.arc(0, 0, Math.min(w, h) * 0.34, 0, Math.PI * 2);
+      const startX = Math.floor(visibleLeft / grid) * grid;
+      const endX = Math.min(worldW, visibleLeft + viewW / this.cameraZoom + grid);
+      const startY = Math.floor(visibleTop / grid) * grid;
+      const endY = Math.min(worldH, visibleTop + viewH / this.cameraZoom + grid);
+      for (let x = startX; x <= endX; x += grid) { ctx.moveTo(x, startY); ctx.lineTo(x, endY); }
+      for (let y = startY; y <= endY; y += grid) { ctx.moveTo(startX, y); ctx.lineTo(endX, y); }
       ctx.stroke();
+      ctx.strokeStyle = "rgba(232, 200, 122, 0.72)";
+      ctx.lineWidth = 4 / this.cameraZoom;
+      ctx.setLineDash([24, 18]);
+      ctx.strokeRect(0, 0, worldW, worldH);
       ctx.setLineDash([]);
-      ctx.restore();
 
       this.drawDrops(ctx, time);
       this.drawVortices(ctx, time);
       this.drawFortuneAura(ctx, time);
+      this.drawBossHazards(ctx, time);
       this.drawEnemies(ctx);
       this.drawProjectiles(ctx);
       this.drawPlayer(ctx, time);
       this.drawPets(ctx, time);
       this.drawParticles(ctx);
+      ctx.restore();
+
+      // Boss 血条与公告属于屏幕 HUD，不随地图缩放。
+      this.drawBossHUD(ctx);
       ctx.restore();
     },
 
@@ -1405,11 +1762,44 @@
         ctx.arc(0, 0, enemy.radius * 2.5, 0, Math.PI * 2);
         ctx.fill();
 
+        if (enemy.isBoss) {
+          // 大体型紫晶守关 Boss：环形护甲、尖角与核心，确保明显区别于小怪。
+          ctx.rotate(Math.sin(this.elapsed * 1.2) * 0.035);
+          ctx.strokeStyle = "rgba(229,204,255,.92)";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(0, 0, enemy.radius * 1.08, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.fillStyle = "#6537A8";
+          ctx.strokeStyle = "#D8B6FF";
+          ctx.lineWidth = 2.4;
+          ctx.beginPath();
+          for (let k = 0; k < 12; k += 1) {
+            const a = k * Math.PI / 6;
+            const r = k % 2 === 0 ? enemy.radius * 1.06 : enemy.radius * 0.78;
+            const px = Math.cos(a) * r;
+            const py = Math.sin(a) * r;
+            if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          }
+          ctx.closePath(); ctx.fill(); ctx.stroke();
+          const core = ctx.createRadialGradient(-8, -10, 2, 0, 0, enemy.radius * 0.72);
+          core.addColorStop(0, "#F8EEFF");
+          core.addColorStop(0.26, "#C89CFF");
+          core.addColorStop(0.72, "#7D4BC2");
+          core.addColorStop(1, "#321B5D");
+          ctx.fillStyle = core;
+          ctx.beginPath(); ctx.arc(0, 0, enemy.radius * 0.72, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = "#FFF7FF";
+          ctx.beginPath(); ctx.ellipse(-12, -4, 4.5, 6, -0.2, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.ellipse(12, -4, 4.5, 6, 0.2, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = "#4B2A70";
+          ctx.beginPath(); ctx.arc(-12, -3, 2, 0, Math.PI * 2); ctx.arc(12, -3, 2, 0, Math.PI * 2); ctx.fill();
+        } else {
         ctx.fillStyle = color;
         ctx.strokeStyle = "rgba(255,255,255,.48)";
-        ctx.lineWidth = enemy.kind === "elite" ? 2 : 1;
+        ctx.lineWidth = (enemy.kind === "elite" || enemy.kind === "bossElite") ? 2 : 1;
         ctx.beginPath();
-        if (enemy.kind === "elite") {
+        if (enemy.kind === "elite" || enemy.kind === "bossElite") {
           ctx.moveTo(0, -enemy.radius);
           ctx.lineTo(enemy.radius * 0.88, -enemy.radius * 0.15);
           ctx.lineTo(enemy.radius * 0.62, enemy.radius * 0.86);
@@ -1421,16 +1811,111 @@
         }
         ctx.fill();
         ctx.stroke();
+        }
 
-        if (enemy.hp < enemy.maxHp || enemy.kind === "elite") {
+        if (!enemy.isBoss && (enemy.hp < enemy.maxHp || enemy.kind === "elite" || enemy.kind === "bossElite")) {
           const barWidth = enemy.radius * 2.4;
           ctx.fillStyle = "rgba(4,10,18,.75)";
           ctx.fillRect(-barWidth / 2, -enemy.radius - 9, barWidth, 3);
-          ctx.fillStyle = enemy.kind === "elite" ? "#B388FF" : "#E68B83";
+          ctx.fillStyle = (enemy.kind === "elite" || enemy.kind === "bossElite") ? "#B388FF" : "#E68B83";
           ctx.fillRect(-barWidth / 2, -enemy.radius - 9, barWidth * Math.max(0, enemy.hp / enemy.maxHp), 3);
         }
         ctx.restore();
       });
+    },
+
+    drawBossHazards(ctx, time) {
+      if (this.boss && this.boss.bossMode === "chargeTell") {
+        const boss = this.boss;
+        const length = Math.max(CONFIG.boss.chargeDistance, Math.hypot(this.viewWidth, this.viewHeight) / this.cameraZoom * 0.72);
+        ctx.save();
+        ctx.globalAlpha = 0.35 + Math.sin(time * 18) * 0.16;
+        ctx.strokeStyle = "#FF7B9C";
+        ctx.lineWidth = boss.radius * 1.18;
+        ctx.lineCap = "round";
+        ctx.setLineDash([16, 12]);
+        ctx.beginPath();
+        ctx.moveTo(boss.x, boss.y);
+        ctx.lineTo(boss.x + boss.chargeDirX * length, boss.y + boss.chargeDirY * length);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      if (!this.bossBarriers.length) return;
+      ctx.save();
+      this.bossBarriers.forEach(barrier => {
+        const warning = barrier.phase === "warning";
+        const alpha = warning ? 0.3 + Math.sin(time * 24) * 0.2 : 0.88;
+        ctx.globalAlpha = alpha;
+        ctx.lineCap = "round";
+        ctx.strokeStyle = warning ? "#F3D67D" : "#74D9FF";
+        ctx.shadowColor = warning ? "#F3D67D" : "#45BFFF";
+        ctx.shadowBlur = warning ? 8 : 20;
+        ctx.lineWidth = warning ? 4 : 11;
+        ctx.setLineDash(warning ? [12, 10] : []);
+        ctx.beginPath(); ctx.moveTo(barrier.x1, barrier.y1); ctx.lineTo(barrier.x2, barrier.y2); ctx.stroke();
+        if (!warning) {
+          ctx.shadowBlur = 0;
+          ctx.strokeStyle = "rgba(239,250,255,.96)";
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(barrier.x1, barrier.y1); ctx.lineTo(barrier.x2, barrier.y2); ctx.stroke();
+          for (let k = 0; k < 9; k += 1) {
+            const t = (k + ((time * 2.7) % 1)) / 9;
+            const x = barrier.x1 + (barrier.x2 - barrier.x1) * t;
+            const y = barrier.y1 + (barrier.y2 - barrier.y1) * t;
+            ctx.beginPath(); ctx.arc(x, y, 3 + Math.sin(time * 20 + k) * 1.3, 0, Math.PI * 2); ctx.fillStyle = "#F4FCFF"; ctx.fill();
+          }
+        }
+      });
+      ctx.restore();
+    },
+
+    drawBossHUD(ctx) {
+      const boss = this.boss;
+      if (boss && !boss.dead) {
+        const width = Math.min(this.viewWidth * 0.62, 460);
+        const x = (this.viewWidth - width) / 2;
+        const y = 18;
+        ctx.save();
+        ctx.fillStyle = "rgba(12,7,28,.84)";
+        ctx.strokeStyle = "rgba(210,178,255,.72)";
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(x, y, width, 28, 8); else ctx.rect(x, y, width, 28);
+        ctx.fill(); ctx.stroke();
+        const fillWidth = Math.max(0, width - 8) * Math.max(0, boss.hp / boss.maxHp);
+        const gradient = ctx.createLinearGradient(x + 4, y, x + width - 4, y);
+        gradient.addColorStop(0, "#8C4BD0"); gradient.addColorStop(1, "#D19AFF");
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(x + 4, y + 4, fillWidth, 20, 5); else ctx.fillRect(x + 4, y + 4, fillWidth, 20);
+        ctx.fill();
+        ctx.fillStyle = "#F7EDFF";
+        ctx.font = "bold 13px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(`守关 Boss · Lv.${boss.bossLevel}`, this.viewWidth / 2, y + 14);
+        ctx.restore();
+      }
+      if (this.bossAnnouncementTimer > 0 && this.bossAnnouncement) {
+        const alpha = Math.min(1, this.bossAnnouncementTimer * 1.6);
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = "rgba(16,8,30,.78)";
+        ctx.strokeStyle = "rgba(207,174,255,.75)";
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        const width = Math.min(this.viewWidth - 32, Math.max(210, this.bossAnnouncement.length * 17 + 34));
+        const x = (this.viewWidth - width) / 2;
+        const y = boss && !boss.dead ? 58 : 22;
+        if (ctx.roundRect) ctx.roundRect(x, y, width, 34, 9); else ctx.rect(x, y, width, 34);
+        ctx.fill(); ctx.stroke();
+        ctx.fillStyle = "#F4E9FF";
+        ctx.font = "600 14px system-ui, sans-serif";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(this.bossAnnouncement, this.viewWidth / 2, y + 17, width - 16);
+        ctx.restore();
+      }
     },
 
     drawProjectiles(ctx) {

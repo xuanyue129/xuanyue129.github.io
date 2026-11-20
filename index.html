@@ -94,14 +94,14 @@
           </div>
         </div>
 
-        <div class="arena-frame">
+        <div id="arenaFrame" class="arena-frame">
           <canvas id="gameCanvas" class="game-canvas" aria-label="米饭的自我救赎战斗画面"></canvas>
           <div id="moveJoystick" class="mobile-joystick" role="group" aria-label="触控移动摇杆">
             <span class="joystick-ring" aria-hidden="true"></span>
             <span id="joystickKnob" class="joystick-knob" aria-hidden="true"></span>
           </div>
           <div class="arena-caption"><span class="live-dot"></span> 生存试炼 · 自动射击已启用</div>
-          <div class="arena-help">W A S D / 方向键 · 手机使用右下摇杆</div>
+          <div class="arena-help">W A S D / 方向键 · 手机使用可自定义位置的轮盘</div>
         </div>
 
         <div class="hud hud-bottom">
@@ -138,6 +138,19 @@
       <div class="setting-row">
         <div><strong>屏幕震动</strong><small>受击时的画面反馈</small></div>
         <label class="switch"><input id="shakeInput" type="checkbox" checked><span></span></label>
+      </div>
+      <div class="joystick-position-editor">
+        <div class="joystick-editor-heading">
+          <div><strong>移动轮盘位置</strong><small>拖动下方预览轮盘，调整手机战斗中的位置</small></div>
+          <button class="text-button" type="button" data-action="reset-joystick-position">恢复默认</button>
+        </div>
+        <div id="joystickPreviewArea" class="joystick-preview-area" aria-label="移动轮盘位置预览">
+          <span class="joystick-preview-label">战斗画面预览</span>
+          <div id="joystickPreviewControl" class="joystick-preview-control" role="slider" aria-label="拖动调整移动轮盘位置" tabindex="0">
+            <span></span>
+          </div>
+        </div>
+        <small class="joystick-editor-note">位置会自动保存，并同步到实际战斗画面。建议避开血量、技能和暂停按钮。</small>
       </div>
       <div class="settings-actions">
         <button class="text-button" type="button" data-action="reset-save">重置本地存档</button>
