@@ -892,7 +892,8 @@ body:not(.about-body) .game-screen {
   .mobile-joystick {
     position: absolute;
     z-index: 5;
-    left: max(12px, var(--safe-left));
+    right: max(12px, var(--safe-right));
+    left: auto;
     bottom: max(12px, var(--safe-bottom));
     display: block;
     width: 116px;
@@ -932,7 +933,7 @@ body:not(.about-body) .game-screen {
   .game-screen .hud-bottom { min-height: 28px; }
 }
 @media (max-width: 767px) and (orientation: landscape) {
-  .mobile-joystick { width: 88px; height: 88px; left: max(8px, var(--safe-left)); bottom: max(8px, var(--safe-bottom)); }
+  .mobile-joystick { width: 88px; height: 88px; right: max(8px, var(--safe-right)); left: auto; bottom: max(8px, var(--safe-bottom)); }
   .joystick-ring { inset: 11px; }
   .joystick-knob { width: 38px; height: 38px; }
   .game-screen .arena-help { max-width: calc(100% - 112px); }
@@ -1196,7 +1197,8 @@ body:not(.about-body) .game-screen {
   body.mobile-game-active .mobile-joystick {
     position: absolute;
     z-index: 5;
-    left: max(12px, var(--safe-left));
+    right: max(12px, var(--safe-right));
+    left: auto;
     bottom: max(12px, var(--safe-bottom));
     display: block;
     width: clamp(96px, 18vh, 126px);
@@ -1285,5 +1287,127 @@ body:not(.about-body) .game-screen {
   body.mobile-game-active .mobile-joystick {
     width: 88px;
     height: 88px;
+  }
+}
+
+
+/* ===== Stage 6.2：手机入口铺满视口 + 右手摇杆 ===== */
+@media (pointer: coarse), (max-width: 900px) {
+  html, body {
+    width: 100%;
+    height: 100%;
+    min-height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  body.mobile-site-mode .site-shell {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    max-width: none;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    margin: 0;
+    padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+    overflow: hidden;
+  }
+
+  body.mobile-site-mode .topbar,
+  body.mobile-site-mode .site-footer {
+    display: none !important;
+  }
+
+  body.mobile-site-mode main {
+    display: flex;
+    flex: 1 1 auto;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  body.mobile-site-mode .menu-screen {
+    min-height: 0;
+    height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: clamp(12px, 3vh, 28px) 0;
+    overscroll-behavior: contain;
+  }
+
+  body.mobile-site-mode .menu-content {
+    width: min(100%, 470px);
+    padding-inline: 10px;
+  }
+
+  body.mobile-site-mode .game-screen {
+    min-height: 0;
+    height: 100%;
+  }
+
+  body.mobile-site-mode .mobile-joystick,
+  body.mobile-game-active .mobile-joystick {
+    left: auto;
+    right: max(12px, var(--safe-right));
+    bottom: max(12px, var(--safe-bottom));
+  }
+
+  body.mobile-site-mode .game-screen .arena-help {
+    left: 9px;
+    right: auto;
+    max-width: calc(100% - 145px);
+    text-align: left;
+  }
+}
+
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 420px) {
+  body.mobile-site-mode .menu-screen {
+    padding-block: 4px;
+  }
+
+  body.mobile-site-mode .menu-content {
+    transform: none;
+  }
+
+  body.mobile-site-mode .eyebrow {
+    margin-bottom: 5px;
+  }
+
+  body.mobile-site-mode .title-ornament {
+    margin: 0 0 4px;
+  }
+
+  body.mobile-site-mode .game-title {
+    font-size: clamp(30px, 7vh, 42px);
+  }
+
+  body.mobile-site-mode .game-subtitle {
+    margin-top: 4px;
+    font-size: 12px;
+  }
+
+  body.mobile-site-mode .title-en {
+    margin: 4px 0 9px;
+  }
+
+  body.mobile-site-mode .menu-buttons {
+    width: min(430px, 86vw);
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  body.mobile-site-mode .menu-button {
+    min-height: 34px;
+    padding: 5px 10px;
+    font-size: 11px;
+  }
+
+  body.mobile-site-mode .menu-hint,
+  body.mobile-site-mode .menu-save-summary {
+    margin-top: 5px;
+    font-size: 9px;
   }
 }

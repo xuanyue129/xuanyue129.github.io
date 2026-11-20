@@ -20,6 +20,7 @@ const checks = [
   ['full viewport dynamic height layout exists', /height:\s*100dvh/.test(css)],
   ['joystick is visible in landscape immersive mode', /body\.mobile-game-active \.mobile-joystick \{[^}]*display:\s*block/s.test(css)],
   ['joystick is positioned over the arena', /body\.mobile-game-active \.mobile-joystick \{[^}]*position:\s*absolute/s.test(css)],
+  ['joystick is anchored on the right', /body\.mobile-game-active \.mobile-joystick \{[^}]*right:\s*max\(/s.test(css) || /body\.mobile-site-mode \.mobile-joystick \{[^}]*right:\s*max\(/s.test(css)],
   ['resize observer watches arena', /new global\.ResizeObserver/.test(game)],
   ['orientation and fullscreen refresh canvas', /orientationchange/.test(main) && /fullscreenchange/.test(main) && /visualViewport/.test(main)]
 ];
