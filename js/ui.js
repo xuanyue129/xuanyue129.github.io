@@ -50,6 +50,7 @@
       if (!action) return;
       switch (action.dataset.action) {
         case "start": this.startRun(); break;
+        case "landscape": this.requestLandscape(); break;
         case "settings": this.openSettings(); break;
         case "close-settings": this.closeSettings(); break;
         case "shop": this.openShop(); break;
@@ -89,11 +90,67 @@
       if (this.elements[id]) this.elements[id].hidden = true;
     },
 
+    isMobileLayout() {
+      return global.matchMedia ? global.matchMedia("(max-width: 900px), (pointer: coarse)").matches : (global.innerWidth || 0) <= 900;
+    },
+
+    async requestFullscreenIfSupported() {
+      const root = document.documentElement;
+      if (document.fullscreenElement || !root.requestFullscreen) return false;
+      try {
+        await root.requestFullscreen({ navigationUI: "hide" });
+        return true;
+      } catch (optionsError) {
+        // Older implementations may support Fullscreen API but reject the options object.
+        try {
+          await root.requestFullscreen();
+          return true;
+        } catch (error) {
+          console.info("[米饭的自我救赎] 当前浏览器未允许全屏，将保留横屏适配布局。", error);
+          return false;
+        }
+      }
+    },
+
+    async lockLandscapeIfSupported() {
+      const orientation = global.screen && global.screen.orientation;
+      if (!orientation || typeof orientation.lock !== "function") return false;
+      try {
+        await orientation.lock("landscape");
+        return true;
+      } catch (error) {
+        // iOS Safari and some embedded browsers do not support orientation locking.
+        console.info("[米饭的自我救赎] 当前浏览器不支持自动锁定横屏，请手动旋转设备。", error);
+        return false;
+      }
+    },
+
+    async requestLandscape() {
+      // Both APIs require a secure context / supported browser; the UI falls back to manual rotation.
+      await this.requestFullscreenIfSupported();
+      await this.lockLandscapeIfSupported();
+    },
+
+    enterMobileImmersiveMode() {
+      if (!this.isMobileLayout()) return;
+      document.body.classList.add("mobile-game-active");
+      // Called synchronously from the start button gesture; fullscreen is best-effort.
+      this.requestFullscreenIfSupported().then(() => this.lockLandscapeIfSupported());
+    },
+
+    exitMobileImmersiveMode() {
+      document.body.classList.remove("mobile-game-active");
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+    },
+
     startRun() {
       const app = global.FantasySurvivor;
       ["pauseModal", "settlementModal", "upgradeModal"].forEach(id => this.closeModal(id));
       this.elements.menuScreen.hidden = true;
       this.elements.gameScreen.hidden = false;
+      this.enterMobileImmersiveMode();
       app.Game.setProgression(this.saveData, app.Upgrades.shardMultiplier(this.saveData));
       app.Game.start();
       app.Game.resize();
@@ -119,6 +176,7 @@
       app.Game.stop();
       this.elements.gameScreen.hidden = true;
       this.elements.menuScreen.hidden = false;
+      this.exitMobileImmersiveMode();
       this.refreshMenu();
     },
 

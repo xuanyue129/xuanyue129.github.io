@@ -2,6 +2,10 @@
 
 ## 自动检查结果
 
+- Stage 6.1 横屏 UI：HTML 具备手机横屏引导层与横屏操作按钮；UI 事件会尝试请求 Fullscreen API 和 Screen Orientation API 的 landscape 锁定。
+- 横屏全屏布局：CSS 在触控横屏设备上隐藏站点导航/页脚，战斗视图固定填充动态视口，并压缩 HUD、保留完整战场与自适应摇杆。
+- 画布重设：补充 orientationchange、fullscreenchange、visualViewport resize 和 ResizeObserver 观察，确保横屏/全屏后 Canvas 重新匹配容器。
+
 - JavaScript：所有脚本通过 `node --check`。
 - HTML：50 个 ID 无重复，UI 引用的 38 个 ID 全部存在。
 - 资源：7 个 JavaScript 文件和 CSS 样式表均能从首页正确定位。
@@ -20,6 +24,8 @@
 8. 三选一生成三张互不重复的卡片，五类标签均存在。
 
 ## 浏览器验收说明
+
+Stage 6.1 的 14 项自动布局与事件检查通过；自动横屏锁定取决于浏览器能力和权限。iOS Safari 通常需要玩家手动旋转，Fullscreen API / Orientation Lock 不可用时会降级为手动提示。当前仍未完成真实手机设备验收。
 
 本次尝试使用 Chromium headless 生成手机截图，但该环境中的 Chromium 进程超时，未能完成截图。因此未将手机视觉验收标记为通过。部署后建议在 iOS Safari 与 Android Chrome 实测：
 

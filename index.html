@@ -2,7 +2,9 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#07111F">
   <meta name="description" content="米饭的自我救赎——随机升级构筑、宠物冲撞与大运反击的生存游戏。">
   <title>米饭的自我救赎</title>
@@ -18,6 +20,19 @@
 <body>
   <canvas id="backgroundCanvas" class="background-canvas" aria-hidden="true"></canvas>
   <div class="ambient-vignette" aria-hidden="true"></div>
+
+  <section class="orientation-prompt" aria-label="请横屏游玩">
+    <div class="orientation-card">
+      <div class="rotate-device-icon" aria-hidden="true"><span></span></div>
+      <p class="eyebrow">LANDSCAPE RECOMMENDED</p>
+      <h1>请将设备旋转至横屏</h1>
+      <p class="orientation-description">《米饭的自我救赎》采用横屏全屏布局。横屏后可获得更宽阔的战场和更舒适的摇杆操作空间。</p>
+      <button class="menu-button menu-button-primary orientation-action" type="button" data-action="landscape">
+        <span>尝试横屏并进入全屏</span><span class="button-glyph" aria-hidden="true">↻</span>
+      </button>
+      <p class="orientation-footnote">若设备未自动旋转，请关闭系统的屏幕方向锁定，再手动横过手机。</p>
+    </div>
+  </section>
 
   <div class="site-shell">
     <header class="topbar">

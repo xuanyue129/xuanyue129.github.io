@@ -143,6 +143,11 @@
         };
 
         global.addEventListener("resize", this._onResize, { passive: true });
+        global.addEventListener("orientationchange", this._onResize, { passive: true });
+        if (typeof global.ResizeObserver === "function" && this.arenaCanvas && this.arenaCanvas.parentElement) {
+          this._resizeObserver = new global.ResizeObserver(this._onResize);
+          this._resizeObserver.observe(this.arenaCanvas.parentElement);
+        }
         global.addEventListener("keydown", this._onKeyDown);
         global.addEventListener("keyup", this._onKeyUp);
         document.addEventListener("visibilitychange", this._onVisibility);
