@@ -90,9 +90,9 @@ if (app.Upgrades.CARDS.some(c=>['vitality','regeneration','healing'].includes(c.
 base.petCount=1; base.petChargeWidth=28; base.petChargeDistance=220; base.petChargeInterval=1.35; base.petChargeSpeed=900; base.vortexUnlocked=true; base.fortuneUnlocked=true;
 if (!app.Upgrades.getEligibleCards(base).some(c=>c.id==='petChargeWidth')) throw new Error('pet charge width upgrade missing');
 
-// 6. Old save migration from v2 heart-HP progression to v4 (including joystick position) heart progression.
+// 6. Old save migration from v2 heart-HP progression to v5 (including joystick and audio settings) heart progression.
 const migrated = app.Save.normalize({version:2,gold:100,permanentUpgrades:{maxHp:9,damage:2,goldRate:1,expRate:1},stats:{bestWave:3}});
-if (migrated.version !== 4 || migrated.permanentUpgrades.maxHp !== 3) throw new Error('save migration failed');
+if (migrated.version !== 5 || migrated.permanentUpgrades.maxHp !== 3) throw new Error('save migration failed');
 
 // 7. New-run defaults are three integer hearts and no pre-unlocked secondary mechanics.
 Game.setProgression({permanentUpgrades:{maxHp:0,damage:0,goldRate:0,expRate:0}},1);

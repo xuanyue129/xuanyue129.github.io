@@ -86,7 +86,7 @@
             <div class="meter meter-exp"><span id="expFill" style="width:0%"></span></div>
           </div>
           <div class="hud-group hud-summary">
-            <div class="hud-chip"><span>✧</span><strong id="hudGold">0</strong><small>本局金币</small></div>
+            <div class="hud-chip hud-gold-chip"><span>✧</span><strong id="hudGold">0</strong><small>本局金币</small><span id="hudGoldGain" class="hud-gold-gain" aria-live="polite"></span></div>
             <div class="hud-chip"><strong id="hudWave">01</strong><small>波次</small></div>
             <div class="hud-chip"><strong id="hudKills">0</strong><small>击杀</small></div>
             <div class="hud-chip hud-time-chip"><strong id="hudTime">00:00</strong><small>生存时间</small></div>
@@ -117,7 +117,7 @@
     <footer class="site-footer">
       <span>米饭的自我救赎</span>
       <span class="footer-separator">✧</span>
-      <span>LOCAL BUILD · V0.6.0</span>
+      <span>LOCAL BUILD · V0.6.6</span>
     </footer>
   </div>
 
@@ -128,9 +128,22 @@
       <p class="eyebrow">SYSTEM SETTINGS</p>
       <h2 id="settingsTitle">游戏设置</h2>
       <div class="setting-row">
-        <div><strong>主音量</strong><small>调整游戏音效音量</small></div>
+        <div><strong>总音量</strong><small>统一调整背景音乐与音效</small></div>
         <label class="range-wrap"><input id="volumeInput" type="range" min="0" max="100" step="1" value="70"><output id="volumeOutput">70%</output></label>
       </div>
+      <div class="setting-row">
+        <div><strong>背景音乐</strong><small>主菜单与战斗共用循环 BGM</small></div>
+        <label class="range-wrap"><input id="bgmVolumeInput" type="range" min="0" max="100" step="1" value="70"><output id="bgmVolumeOutput">70%</output></label>
+      </div>
+      <div class="setting-row">
+        <div><strong>游戏音效</strong><small>攻击、受击、升级与 Boss 提示</small></div>
+        <label class="range-wrap"><input id="sfxVolumeInput" type="range" min="0" max="100" step="1" value="80"><output id="sfxVolumeOutput">80%</output></label>
+      </div>
+      <div class="setting-row">
+        <div><strong>启用音频</strong><small>一键静音背景音乐和所有音效</small></div>
+        <label class="switch"><input id="audioEnabledInput" type="checkbox" checked aria-label="启用背景音乐和游戏音效"><span></span></label>
+      </div>
+      <p class="modal-footnote">浏览器限制自动播放。首次点击或按键后，背景音乐会开始循环；若没有 BGM，请确认已放入 assets/audio/bgm1.mp3。</p>
       <div class="setting-row">
         <div><strong>粒子特效</strong><small>控制背景与战斗粒子</small></div>
         <label class="switch"><input id="particlesInput" type="checkbox" checked><span></span></label>

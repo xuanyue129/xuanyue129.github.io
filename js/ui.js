@@ -7,13 +7,17 @@
     elements: {},
     toastTimer: 0,
     lastResult: null,
+    goldAnimatedTarget: null,
+    goldDisplayedValue: 0,
+    goldAnimationFrame: 0,
     settingsPausedRun: false,
     init(saveData) {
       this.saveData = saveData;
       const ids = [
         "menuScreen", "gameScreen", "settingsModal", "pauseModal", "settlementModal", "toast",
-        "volumeInput", "volumeOutput", "particlesInput", "shakeInput", "hudHealth", "hudHearts",
-        "hudLevel", "hudExpText", "expFill", "hudGold", "hudWave", "hudKills", "hudTime", "hudBuffs",
+        "volumeInput", "volumeOutput", "bgmVolumeInput", "bgmVolumeOutput", "sfxVolumeInput", "sfxVolumeOutput", "audioEnabledInput",
+        "particlesInput", "shakeInput", "hudHealth", "hudHearts",
+        "hudLevel", "hudExpText", "expFill", "hudGold", "hudGoldGain", "hudWave", "hudKills", "hudTime", "hudBuffs",
         "resultTime", "resultKills", "resultLevel", "resultExperience", "resultGold", "resultTotalGold",
         "upgradeModal", "upgradeCards", "shopModal", "shopCards", "shopGold", "prestigeModal",
         "prestigeInfo", "offlineModal", "offlineInfo", "upgradeTitle", "upgradeSubtitle", "confirmPrestige",
@@ -34,6 +38,14 @@
 
       document.addEventListener("click", event => this.handleClick(event));
       document.addEventListener("keydown", event => this.handleKeydown(event));
+      // 浏览器要求由用户手势触发音频，第一次点击/按键后启动共享 BGM。
+      const unlockAudio = () => {
+        app.Audio.unlock();
+        document.removeEventListener("pointerdown", unlockAudio, true);
+        document.removeEventListener("keydown", unlockAudio, true);
+      };
+      document.addEventListener("pointerdown", unlockAudio, { capture: true, passive: true });
+      document.addEventListener("keydown", unlockAudio, { capture: true });
       this.bindSettings();
       this.bindJoystickPreview();
       this.refreshSettings();
@@ -50,6 +62,8 @@
     handleClick(event) {
       const action = event.target.closest("[data-action]");
       if (!action) return;
+      const audio = global.FantasySurvivor.Audio;
+      if (audio && action.dataset.action !== "upgrade-card") audio.playUi();
       switch (action.dataset.action) {
         case "start": this.startRun(); break;
         case "landscape": this.requestLandscape(); break;
@@ -198,11 +212,69 @@
       this.elements.hudLevel.textContent = data.level;
       this.elements.hudExpText.textContent = `${Math.floor(data.exp)} / ${data.expRequired}`;
       this.elements.expFill.style.width = `${data.expPercent}%`;
-      this.elements.hudGold.textContent = data.gold;
+      this.animateGoldCounter(data.gold);
       this.elements.hudWave.textContent = String(data.wave).padStart(2, "0");
       this.elements.hudKills.textContent = data.kills;
       this.elements.hudTime.textContent = this.formatTime(data.time);
       this.elements.hudBuffs.textContent = data.buffs;
+    },
+
+    animateGoldCounter(targetValue) {
+      const value = Math.max(0, Math.floor(Number(targetValue) || 0));
+      const counter = this.elements.hudGold;
+      if (!counter) return;
+
+      if (this.goldAnimatedTarget === null) {
+        this.goldAnimatedTarget = value;
+        this.goldDisplayedValue = value;
+        counter.textContent = String(value);
+        return;
+      }
+      if (value === this.goldAnimatedTarget) return;
+
+      // 新的一局会把本局金币归零；重置时不播放负增长动画。
+      if (value < this.goldAnimatedTarget) {
+        if (this.goldAnimationFrame && global.cancelAnimationFrame) global.cancelAnimationFrame(this.goldAnimationFrame);
+        this.goldAnimatedTarget = value;
+        this.goldDisplayedValue = value;
+        counter.textContent = String(value);
+        return;
+      }
+
+      const gained = value - this.goldAnimatedTarget;
+      const startValue = this.goldDisplayedValue;
+      const startTime = global.performance && global.performance.now ? global.performance.now() : Date.now();
+      const duration = Math.min(720, 320 + Math.log10(gained + 1) * 105);
+      this.goldAnimatedTarget = value;
+
+      const gainLabel = this.elements.hudGoldGain;
+      if (gainLabel) {
+        gainLabel.textContent = `+${gained}`;
+        gainLabel.classList.remove("is-active");
+        void gainLabel.offsetWidth;
+        gainLabel.classList.add("is-active");
+      }
+
+      if (this.goldAnimationFrame && global.cancelAnimationFrame) global.cancelAnimationFrame(this.goldAnimationFrame);
+      const tick = now => {
+        const progress = Math.min(1, Math.max(0, (now - startTime) / duration));
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const shown = Math.round(startValue + (value - startValue) * eased);
+        this.goldDisplayedValue = shown;
+        counter.textContent = String(shown);
+        if (progress < 1 && global.requestAnimationFrame) {
+          this.goldAnimationFrame = global.requestAnimationFrame(tick);
+        } else {
+          this.goldDisplayedValue = value;
+          counter.textContent = String(value);
+          this.goldAnimationFrame = 0;
+        }
+      };
+      if (global.requestAnimationFrame) this.goldAnimationFrame = global.requestAnimationFrame(tick);
+      else {
+        this.goldDisplayedValue = value;
+        counter.textContent = String(value);
+      }
     },
 
     showUpgrade(level, count) {
@@ -232,6 +304,7 @@
       if (!card) return;
       const game = global.FantasySurvivor.Game;
       if (!game.applyUpgrade(card)) return;
+      global.FantasySurvivor.Audio.playSfx("upgrade");
       this.persist();
       this.closeModal("upgradeModal");
       game.continueAfterUpgrade();
@@ -341,11 +414,31 @@
     },
 
     bindSettings() {
+      const audio = global.FantasySurvivor.Audio;
       this.elements.volumeInput.addEventListener("input", () => {
         const value = Number(this.elements.volumeInput.value);
         this.saveData.settings.masterVolume = value;
         this.elements.volumeOutput.value = `${value}%`;
-        global.FantasySurvivor.Audio.setVolume(value / 100);
+        audio.setMasterVolume(value / 100);
+        this.persist();
+      });
+      this.elements.bgmVolumeInput.addEventListener("input", () => {
+        const value = Number(this.elements.bgmVolumeInput.value);
+        this.saveData.settings.bgmVolume = value;
+        this.elements.bgmVolumeOutput.value = `${value}%`;
+        audio.setBgmVolume(value / 100);
+        this.persist();
+      });
+      this.elements.sfxVolumeInput.addEventListener("input", () => {
+        const value = Number(this.elements.sfxVolumeInput.value);
+        this.saveData.settings.sfxVolume = value;
+        this.elements.sfxVolumeOutput.value = `${value}%`;
+        audio.setSfxVolume(value / 100);
+        this.persist();
+      });
+      this.elements.audioEnabledInput.addEventListener("change", () => {
+        this.saveData.settings.audioEnabled = this.elements.audioEnabledInput.checked;
+        audio.setEnabled(this.saveData.settings.audioEnabled);
         this.persist();
       });
       this.elements.particlesInput.addEventListener("change", () => {
@@ -364,9 +457,17 @@
       const settings = this.saveData.settings;
       this.elements.volumeInput.value = settings.masterVolume;
       this.elements.volumeOutput.value = `${settings.masterVolume}%`;
+      this.elements.bgmVolumeInput.value = settings.bgmVolume;
+      this.elements.bgmVolumeOutput.value = `${settings.bgmVolume}%`;
+      this.elements.sfxVolumeInput.value = settings.sfxVolume;
+      this.elements.sfxVolumeOutput.value = `${settings.sfxVolume}%`;
+      this.elements.audioEnabledInput.checked = settings.audioEnabled;
       this.elements.particlesInput.checked = settings.particles;
       this.elements.shakeInput.checked = settings.screenShake;
-      global.FantasySurvivor.Audio.setVolume(settings.masterVolume / 100);
+      global.FantasySurvivor.Audio.setMasterVolume(settings.masterVolume / 100);
+      global.FantasySurvivor.Audio.setBgmVolume(settings.bgmVolume / 100);
+      global.FantasySurvivor.Audio.setSfxVolume(settings.sfxVolume / 100);
+      global.FantasySurvivor.Audio.setEnabled(settings.audioEnabled);
       global.FantasySurvivor.Game.setParticlesEnabled(settings.particles);
       global.FantasySurvivor.Game.setScreenShakeEnabled(settings.screenShake);
       this.applyJoystickPosition(settings.joystickPosition || { x: 0.86, y: 0.78 }, false);

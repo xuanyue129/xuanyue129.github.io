@@ -156,6 +156,10 @@ main { display: flex; flex: 1; min-height: 0; }
 .hud-summary { margin-left: auto; }
 .hud-chip { display: grid; grid-template-columns: auto auto; align-items: center; column-gap: 5px; min-width: 55px; }
 .hud-chip span { color: var(--gold-primary); }
+.hud-gold-chip { position: relative; }
+.hud-gold-gain { position: absolute; z-index: 4; top: -14px; right: -4px; color: var(--gold-bright) !important; font-family: var(--font-numeric); font-size: 12px; font-weight: 800; line-height: 1; opacity: 0; pointer-events: none; white-space: nowrap; text-shadow: 0 2px 8px rgba(0,0,0,.8), 0 0 12px rgba(243,223,168,.5); }
+.hud-gold-gain.is-active { animation: hud-gold-gain-float 900ms cubic-bezier(.18,.72,.3,1) both; }
+@keyframes hud-gold-gain-float { 0% { opacity: 0; transform: translate(0, 7px) scale(.82); } 18% { opacity: 1; transform: translate(0, 0) scale(1.08); } 100% { opacity: 0; transform: translate(8px, -25px) scale(1); } }
 .hud-chip small { grid-column: 2; }
 .pause-button { width: 38px; height: 38px; font-size: 16px; }
 .arena-frame { position: relative; flex: 1; min-height: 310px; overflow: hidden; border: 1px solid rgba(232, 200, 122, .34); border-radius: 18px; background: radial-gradient(ellipse at center, rgba(29, 64, 91, .7), rgba(7, 17, 31, .96)); box-shadow: 0 20px 55px rgba(0,0,0,.22), inset 0 0 55px rgba(79,195,247,.045); }

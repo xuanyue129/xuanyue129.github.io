@@ -1,35 +1,18 @@
-# Stage 6 测试报告
+# 《米饭的自我救赎》Stage 6.5 综合测试说明
 
-## 自动检查结果
+本项目保留 Stage 6.1–6.4 的移动端全屏、大地图、Boss 和轮盘自定义功能，并新增 Stage 6.5 Boss 血量递增及三倍金币 HUD 奖励。
 
-- Stage 6.1 横屏 UI：HTML 具备手机横屏引导层与横屏操作按钮；UI 事件会尝试请求 Fullscreen API 和 Screen Orientation API 的 landscape 锁定。
-- 横屏全屏布局：CSS 在触控横屏设备上隐藏站点导航/页脚，战斗视图固定填充动态视口，并压缩 HUD、保留完整战场与自适应摇杆。
-- 画布重设：补充 orientationchange、fullscreenchange、visualViewport resize 和 ResizeObserver 观察，确保横屏/全屏后 Canvas 重新匹配容器。
+本次新增细节与测试明细见 `STAGE6_5_TEST_REPORT.md`。Stage 6.1–6.4 的测试明细保留在对应报告中。
 
-- JavaScript：所有脚本通过 `node --check`。
-- HTML：50 个 ID 无重复，UI 引用的 38 个 ID 全部存在。
-- 资源：7 个 JavaScript 文件和 CSS 样式表均能从首页正确定位。
-- CSS：括号计数平衡（354 对）。
-- 自动逻辑测试：通过。
+自动化回归测试命令：
 
-## 逻辑覆盖
+```bash
+node run_stage6_tests.cjs
+node run_stage6_1_layout_checks.cjs
+node run_stage6_2_mobile_fullscreen_checks.cjs
+node run_stage6_3_boss_checks.cjs
+node run_stage6_4_camera_joystick_checks.cjs
+node run_stage6_5_boss_gold_checks.cjs
+```
 
-1. 每次有效受击固定失去 1 颗心；三颗心被连续命中三次后归零。
-2. 宠物冲撞检测路径线段与敌人的碰撞距离，同一次冲撞可以伤害路径上的多名敌人。
-3. 解锁大运后，受击会激活限时光环；范围内敌人持续受到伤害。
-4. 大运的击杀累计恢复、定时恢复均按 1 颗心处理；生命上限升级只增加上限，不会额外回复当前生命。
-5. 宠物、大运和聚怪词条均有前置解锁条件；通用词条不依赖流派。
-6. v2 存档可迁移为 v3，旧生命商店等级折算为新心数等级。
-7. 触控摇杆的方向向量会参与角色移动；释放触控后向量归零。
-8. 三选一生成三张互不重复的卡片，五类标签均存在。
-
-## 浏览器验收说明
-
-Stage 6.1 的 14 项自动布局与事件检查通过；自动横屏锁定取决于浏览器能力和权限。iOS Safari 通常需要玩家手动旋转，Fullscreen API / Orientation Lock 不可用时会降级为手动提示。当前仍未完成真实手机设备验收。
-
-本次尝试使用 Chromium headless 生成手机截图，但该环境中的 Chromium 进程超时，未能完成截图。因此未将手机视觉验收标记为通过。部署后建议在 iOS Safari 与 Android Chrome 实测：
-
-- 左下摇杆拖动、松手回中，以及屏幕旋转后的摇杆位置。
-- 小屏竖屏和横屏下，HUD、画布、暂停按钮和升级弹窗是否互相遮挡。
-- 宠物冲撞在高密度敌群中的命中范围和冲撞间隔。
-- 大运光环触发时的视觉范围、伤害频率和心数更新。
+真实浏览器视觉验收仍需在部署后的设备上完成。

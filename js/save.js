@@ -3,8 +3,8 @@
   "use strict";
   const STORAGE_KEY = "fantasy-survivor-save-v1";
   const BACKUP_KEY = "fantasy-survivor-save-backup-v1";
-  const VERSION = 4;
-  const OFFLINE = Object.freeze({ maxHours: 8, baseGoldPerHour: 3, waveBonusPerHour: 1.25, maxGold: 180 });
+  const VERSION = 5;
+  const OFFLINE = Object.freeze({ maxHours: 8, baseGoldPerHour: 3, waveBonusPerHour: 1.25, goldMultiplier: 3, maxGold: 540 });
   const clamp = (v, min, max, fallback) => {
     const n = Number(v); return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
   };
@@ -14,7 +14,7 @@
       gold: 0, shards: 0, prestigeCount: 0,
       permanentUpgrades: { maxHp: 0, damage: 0, goldRate: 0, expRate: 0 },
       stats: { lifetimeKills: 0, bestSurvivalSeconds: 0, bestLevel: 1, bestWave: 1 },
-      settings: { masterVolume: 70, particles: true, screenShake: true, joystickPosition: { x: 0.86, y: 0.78 } }
+      settings: { masterVolume: 70, bgmVolume: 70, sfxVolume: 80, audioEnabled: true, particles: true, screenShake: true, joystickPosition: { x: 0.86, y: 0.78 } }
     };
   }
   function migrate(data) {
@@ -37,6 +37,14 @@
       settings.joystickPosition = settings.joystickPosition || { x: 0.86, y: 0.78 };
       d = { ...d, settings, version: 4, schemaVersion: 4 };
     }
+    if (oldVersion < 5) {
+      const settings = { ...(d.settings || {}) };
+      // 旧版 masterVolume 继续作为总音量；为新音频通道补齐独立默认值。
+      settings.bgmVolume = settings.bgmVolume == null ? 70 : settings.bgmVolume;
+      settings.sfxVolume = settings.sfxVolume == null ? 80 : settings.sfxVolume;
+      settings.audioEnabled = settings.audioEnabled !== false;
+      d = { ...d, settings, version: 5, schemaVersion: 5 };
+    }
     return d;
   }
   function normalize(data) {
@@ -49,7 +57,11 @@
       permanentUpgrades: { maxHp: clamp(up.maxHp,0,10,0), damage: clamp(up.damage,0,1000,0), goldRate: clamp(up.goldRate,0,1000,0), expRate: clamp(up.expRate,0,1000,0) },
       stats: { ...base.stats, ...st, lifetimeKills: clamp(st.lifetimeKills,0,1e12,0), bestSurvivalSeconds: clamp(st.bestSurvivalSeconds,0,1e9,0), bestLevel: clamp(st.bestLevel,1,1e6,1), bestWave: clamp(st.bestWave,1,1e6,1) },
       settings: {
-        masterVolume: clamp(s.masterVolume,0,100,70), particles: s.particles !== false, screenShake: s.screenShake !== false,
+        masterVolume: clamp(s.masterVolume,0,100,70),
+        bgmVolume: clamp(s.bgmVolume,0,100,70),
+        sfxVolume: clamp(s.sfxVolume,0,100,80),
+        audioEnabled: s.audioEnabled !== false,
+        particles: s.particles !== false, screenShake: s.screenShake !== false,
         joystickPosition: {
           x: clamp(s.joystickPosition && s.joystickPosition.x, 0.08, 0.92, 0.86),
           y: clamp(s.joystickPosition && s.joystickPosition.y, 0.10, 0.90, 0.78)
@@ -76,7 +88,7 @@
     const now = Date.now();
     const elapsedHours = Math.min(OFFLINE.maxHours, Math.max(0, (now - data.lastSeenAt) / 3600000));
     const wave = Math.max(1, data.stats.bestWave || 1);
-    const offlineGold = Math.min(OFFLINE.maxGold, Math.floor(elapsedHours * (OFFLINE.baseGoldPerHour + (wave - 1) * OFFLINE.waveBonusPerHour)));
+    const offlineGold = Math.min(OFFLINE.maxGold, Math.floor(elapsedHours * (OFFLINE.baseGoldPerHour + (wave - 1) * OFFLINE.waveBonusPerHour) * OFFLINE.goldMultiplier));
     data.offlineReward = { hours: elapsedHours, gold: offlineGold, wave };
     data.gold += offlineGold;
     data.lastSeenAt = now;

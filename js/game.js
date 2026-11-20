@@ -5,6 +5,11 @@
 (function (global) {
   "use strict";
 
+  function playSfx(name) {
+    const audio = global.FantasySurvivor && global.FantasySurvivor.Audio;
+    if (audio && typeof audio.playSfx === "function") audio.playSfx(name);
+  }
+
   const CONFIG = Object.freeze({
     player: {
       hp: 3,
@@ -61,8 +66,8 @@
     boss: {
       firstLevel: 10,
       levelInterval: 10,
-      baseHp: 700,
-      hpPerLevel: 90,
+      baseHp: 520,
+      hpIncreasePerEncounter: 320,
       radius: 46,
       speed: 46,
       contactDamage: 12,
@@ -443,6 +448,7 @@
       this.lastTime = performance.now();
       this.updateHUD(true);
       this.renderArena(this.elapsed);
+      playSfx("runStart");
     },
 
     pause() {
@@ -658,7 +664,8 @@
       this.bossBarriers.length = 0;
 
       const waveScale = 1 + (this.getWave() - 1) * 0.14;
-      const hp = Math.round((CONFIG.boss.baseHp + level * CONFIG.boss.hpPerLevel) * waveScale);
+      const encounterIndex = Math.max(0, Math.floor((level - CONFIG.boss.firstLevel) / CONFIG.boss.levelInterval));
+      const hp = Math.round((CONFIG.boss.baseHp + encounterIndex * CONFIG.boss.hpIncreasePerEncounter) * waveScale);
       const visibleWidth = this.viewWidth / this.cameraZoom;
       const visibleHeight = this.viewHeight / this.cameraZoom;
       const x = Math.max(CONFIG.boss.radius + 12, Math.min(this.arenaWidth - CONFIG.boss.radius - 12, this.player.x + (Math.random() - 0.5) * visibleWidth * 0.38));
@@ -680,6 +687,7 @@
       this.bossAnnouncement = `BOSS 来袭 · Lv.${level}`;
       this.bossAnnouncementTimer = 2.4;
       this.spawnBurst(boss.x, boss.y, "#C9A2FF", 42, 190);
+      playSfx("bossAppear");
       this.updateHUD(true);
     },
 
@@ -745,6 +753,7 @@
         const aimLength = Math.hypot(aimX, aimY) || 1;
         boss.chargeDirX = aimX / aimLength;
         boss.chargeDirY = aimY / aimLength;
+        playSfx("bossCharge");
         boss.bossMode = "chargeTell";
         boss.bossModeTimer = CONFIG.boss.chargeTell;
         this.bossAnnouncement = "警告：Boss 即将冲撞";
@@ -778,6 +787,7 @@
       this.bossBarriers.push({ x1, y1, x2, y2, phase: "warning", timer: CONFIG.boss.barrierTell, activeDuration: CONFIG.boss.barrierDuration, hitCooldown: 0 });
       this.bossAnnouncement = "警告：带电屏障形成";
       this.bossAnnouncementTimer = CONFIG.boss.barrierTell;
+      playSfx("bossBarrier");
     },
 
     updateBossBarriers(dt) {
@@ -821,6 +831,7 @@
       this.bossAnnouncement = "Boss 召唤了 3 只紫色精英";
       this.bossAnnouncementTimer = 1.9;
       this.spawnBurst(boss.x, boss.y, "#B66CFF", 26, 145);
+      playSfx("bossSummon");
     },
 
     killBoss(boss) {
@@ -828,8 +839,9 @@
       boss.dead = true;
       this.runKills += 1;
       this.spawnBurst(boss.x, boss.y, "#D3B4FF", 64, 230);
+      playSfx("bossDefeat");
       this.spawnDrop(boss.x, boss.y, "exp", Math.max(35, Math.floor(boss.bossLevel * 5)));
-      this.spawnDrop(boss.x + 22, boss.y, "gold", 35 + boss.bossLevel);
+      this.awardGold(35 + boss.bossLevel);
       // Boss 召唤的小怪随 Boss 一同退场，普通刷怪随后恢复。
       for (const enemy of this.enemies) {
         if (enemy !== boss && enemy.isBossMinion && !enemy.dead) {
@@ -1092,6 +1104,7 @@
       }
 
       this.spawnBurst(p.x, p.y, THEME_COLOR, 2 + count, 14);
+      playSfx("shoot");
       p.attackTimer = p.attackInterval;
 
       // 每轮主角射击计数一次，与本轮子弹数量无关。
@@ -1165,6 +1178,7 @@
           damage: p.petDamage, hitEnemies: []
         };
         this.spawnBurst(petX, petY, "#B99AFF", 4, 35);
+        playSfx("petCharge");
       }
     },
 
@@ -1201,6 +1215,7 @@
       }
       // 限制场上漩涡总量，避免后期特效与计算量无限累积。
       while (this.vortices.length > 12) this.vortices.shift();
+      playSfx("vortexSpawn");
     },
 
     updateVortices(dt) {
@@ -1325,7 +1340,10 @@
     damageEnemy(enemy, amount, showHit) {
       if (!enemy || enemy.dead) return;
       enemy.hp -= Math.max(0, amount);
-      if (showHit) enemy.flash = 0.09;
+      if (showHit) {
+        enemy.flash = 0.09;
+        playSfx("enemyHit");
+      }
       if (enemy.hp <= 0) this.killEnemy(enemy);
     },
 
@@ -1337,6 +1355,7 @@
       }
       enemy.dead = true;
       this.runKills += 1;
+      playSfx("enemyDefeat");
       const p = this.player;
       if (p && p.fortuneUnlocked && Number.isFinite(p.fortuneKillHealEvery)) {
         p.fortuneKillCounter += 1;
@@ -1355,7 +1374,7 @@
         const value = enemy.kind === "elite"
           ? 8 + Math.floor(Math.random() * 5)
           : 1 + Math.floor(Math.random() * 3);
-        this.spawnDrop(enemy.x, enemy.y, "gold", value);
+        this.awardGold(value);
       }
 
       this.spawnBurst(enemy.x, enemy.y, enemy.color, enemy.kind === "elite" ? 18 : 9, 80);
@@ -1370,7 +1389,19 @@
       }
     },
 
+    awardGold(baseValue) {
+      const p = this.player;
+      const amount = Math.max(1, Math.floor(Math.max(0, Number(baseValue) || 0) * 3 *
+        (p && p.goldMultiplier || 1) * (p && p.globalMultiplier || 1)));
+      this.runGold += amount;
+      playSfx("coin");
+      this.updateHUD(true);
+      return amount;
+    },
+
     spawnDrop(x, y, kind, value) {
+      // 金币直接计入本局收益并由 HUD 动画反馈，不再生成地面金币实体。
+      if (kind === "gold") return this.awardGold(value);
       const entities = global.FantasySurvivor.Entities;
       this.drops.push(entities.acquire("drop", {
         x, y,
@@ -1415,11 +1446,7 @@
         drop.y += drop.vy * dt;
 
         if (distance < p.radius + drop.radius + 5) {
-          if (drop.kind === "gold") {
-            this.runGold += Math.max(1, Math.floor(drop.value * (p.goldMultiplier || 1) * (p.globalMultiplier || 1)));
-          } else {
-            this.addExperience(drop.value);
-          }
+          this.addExperience(drop.value);
           this.spawnBurst(drop.x, drop.y, drop.color, 5, 35);
           entities.release("drop", this.drops.splice(i, 1)[0]);
         }
@@ -1437,6 +1464,8 @@
         this.pendingLevelUps += 1;
         this.queueBossForLevel(p.level);
       }
+      if (this.pendingLevelUps > 0) playSfx("levelUp");
+      else playSfx("expPickup");
       this.updateHUD(true);
       if (this.pendingLevelUps > 0 && !this.paused) {
         this.pause();
@@ -1480,6 +1509,7 @@
         this.shakeStrength = 4;
       }
       this.spawnBurst(p.x, p.y, "#FF8B91", 11, 65);
+      playSfx("playerHit");
       if (typeof this.callbacks.onPlayerHit === "function") {
         this.callbacks.onPlayerHit(p.hp, p.maxHp);
       }
@@ -1559,6 +1589,7 @@
     finishRun() {
       if (this.gameOverHandled || !this.player) return;
       this.gameOverHandled = true;
+      playSfx("gameOver");
       this.active = false;
       this.paused = false;
       this.keys.clear();
@@ -1728,22 +1759,13 @@
         ctx.rotate(time * 0.8);
         ctx.globalAlpha = Math.min(1, drop.life / 1.2);
         ctx.fillStyle = drop.color;
-        if (drop.kind === "gold") {
-          ctx.beginPath();
-          ctx.arc(0, 0, drop.radius * pulse, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.strokeStyle = "rgba(255,245,202,.85)";
-          ctx.lineWidth = 1;
-          ctx.stroke();
-        } else {
-          ctx.beginPath();
-          ctx.moveTo(0, -drop.radius * 1.4 * pulse);
-          ctx.lineTo(drop.radius * pulse, 0);
-          ctx.lineTo(0, drop.radius * 1.4 * pulse);
-          ctx.lineTo(-drop.radius * pulse, 0);
-          ctx.closePath();
-          ctx.fill();
-        }
+        ctx.beginPath();
+        ctx.moveTo(0, -drop.radius * 1.4 * pulse);
+        ctx.lineTo(drop.radius * pulse, 0);
+        ctx.lineTo(0, drop.radius * 1.4 * pulse);
+        ctx.lineTo(-drop.radius * pulse, 0);
+        ctx.closePath();
+        ctx.fill();
         ctx.restore();
       });
     },
