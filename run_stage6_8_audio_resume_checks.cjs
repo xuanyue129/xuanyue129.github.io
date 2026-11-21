@@ -35,11 +35,11 @@ vm.runInContext(fs.readFileSync(path.join(root,'js/audio.js'),'utf8'), sandbox, 
 
 (async () => {
   const audio = fakeWindow.FantasySurvivor.Audio;
-  audio.unlock();
+  const unlockPromise = audio.unlock();
   // This is the exact first-interaction race: SFX is requested while resume() is pending.
   audio.playSfx('runStart');
   audio.playSfx('playerHit');
-  await Promise.resolve();
+  await unlockPromise;
   await Promise.resolve();
   const context = FakeAudioContext.instances[0];
   if (!context || context.state !== 'running') throw new Error('AudioContext did not resume from the initial user gesture');

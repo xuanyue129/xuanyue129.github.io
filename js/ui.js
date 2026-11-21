@@ -45,7 +45,12 @@
       document.addEventListener("click", event => this.handleClick(event));
       document.addEventListener("keydown", event => this.handleKeydown(event));
       // 浏览器要求由用户手势触发音频，第一次点击/按键后启动共享 BGM。
-      const unlockAudio = () => {
+      const unlockAudio = event => {
+        // 若首次交互就是“开始冒险”，先切入战斗静音场景再解锁音频，
+        // 防止预加载已完成时菜单 BGM 在 pointerdown 与 click 之间短暂响起。
+        const target = event && event.target;
+        const startsRun = target && typeof target.closest === "function" && target.closest('[data-action="start"]');
+        if (startsRun) app.Audio.setScene("combat");
         app.Audio.unlock();
         document.removeEventListener("pointerdown", unlockAudio, true);
         document.removeEventListener("keydown", unlockAudio, true);
@@ -215,7 +220,7 @@
       this.closeModal("pauseModal");
       global.FantasySurvivor.Game.resume();
       const game = global.FantasySurvivor.Game;
-      global.FantasySurvivor.Audio.setScene(game.bossActive ? "boss" : "combat");
+      global.FantasySurvivor.Audio.setScene(game.bossActive ? "boss" : (game.bossMusicUnlocked ? "postBoss" : "combat"));
     },
 
     returnToMenu() {
@@ -239,7 +244,7 @@
 
     updateHUD(data) {
       const audio = global.FantasySurvivor.Audio;
-      if (audio) audio.setScene(data.bossActive ? "boss" : (global.FantasySurvivor.Game.inRun ? "combat" : "menu"));
+      if (audio) audio.setScene(data.gameOver ? "silent" : (data.bossActive ? "boss" : (data.bossMusicUnlocked ? "postBoss" : (global.FantasySurvivor.Game.inRun ? "combat" : "menu"))));
       const currentHearts = Math.max(0, Math.ceil(data.hp));
       const maximumHearts = Math.max(1, Math.ceil(data.maxHp));
       this.elements.hudHealth.textContent = `${currentHearts} / ${maximumHearts}`;
@@ -511,7 +516,7 @@
         this.settingsPausedRun = false;
         global.FantasySurvivor.Game.resume();
       const game = global.FantasySurvivor.Game;
-      global.FantasySurvivor.Audio.setScene(game.bossActive ? "boss" : "combat");
+      global.FantasySurvivor.Audio.setScene(game.bossActive ? "boss" : (game.bossMusicUnlocked ? "postBoss" : "combat"));
       }
     },
 

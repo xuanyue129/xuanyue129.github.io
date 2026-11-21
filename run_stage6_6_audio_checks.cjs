@@ -35,6 +35,8 @@ const fakeDocument = { hidden: false, baseURI: 'https://example.test/game/', add
 const fakeWindow = {
   Audio: FakeAudio,
   AudioContext: FakeAudioContext,
+  fetch() { return Promise.resolve({ ok:true, blob() { return Promise.resolve({ size:5000000 }); } }); },
+  URL: { createObjectURL() { return 'blob:audio-test'; } },
   addEventListener() {},
   localStorage: { getItem(k) { return stored.get(k) ?? null; }, setItem(k,v) { stored.set(k,v); }, removeItem(k) { stored.delete(k); } }
 };
@@ -45,13 +47,13 @@ for (const file of ['js/save.js', 'js/audio.js']) {
 }
 const app = fakeWindow.FantasySurvivor;
 
-// 1. Existing V4 saves migrate to V7 without losing their volume or joystick position.
+// 1. Existing V4 saves migrate to V8 without losing their volume or joystick position.
 const migrated = app.Save.normalize({
   version: 4, gold: 1234,
   settings: { masterVolume: 42, joystickPosition: { x: 0.55, y: 0.63 } }
 });
-if (migrated.version !== 7 || migrated.gold !== 1234) throw new Error('V4 save migration lost data or failed to bump version');
-if (migrated.settings.masterVolume !== 42 || migrated.settings.bgmVolume !== 35 || migrated.settings.sfxVolume !== 80 || migrated.settings.audioEnabled !== true) {
+if (migrated.version !== 8 || migrated.gold !== 1234) throw new Error('V4 save migration lost data or failed to bump version');
+if (migrated.settings.masterVolume !== 42 || migrated.settings.bgmVolume !== 15 || migrated.settings.sfxVolume !== 100 || migrated.settings.audioEnabled !== true) {
   throw new Error('V4 audio settings migration defaults incorrect');
 }
 if (migrated.settings.joystickPosition.x !== 0.55) throw new Error('V4 joystick setting was not preserved');
@@ -60,8 +62,11 @@ if (migrated.settings.joystickPosition.x !== 0.55) throw new Error('V4 joystick 
 const audio = app.Audio;
 if (audio.getMusicSource() !== './assets/audio/bgm1.mp3') throw new Error('BGM relative source path incorrect');
 const bgmElement = FakeAudio.instances[0];
-if (!bgmElement || bgmElement.loop !== true || bgmElement.preload !== 'auto') throw new Error('BGM does not loop/preload');
-audio.unlock();
+if (!bgmElement || bgmElement.loop !== true || bgmElement.preload !== 'none') throw new Error('BGM preload gate was not initialized');
+
+(async () => {
+// 2. One shared looped track starts from the unlock gesture after preload.
+await audio.unlock();
 if (bgmElement.playCount !== 1 || bgmElement.paused) throw new Error('unlock did not start BGM');
 
 // 3. Master and BGM channels combine, and global mute pauses the same audio element.
@@ -71,6 +76,7 @@ if (Math.abs(bgmElement.volume - 0.2) > 0.0001) throw new Error(`BGM volume mix 
 audio.setEnabled(false);
 if (!bgmElement.paused || bgmElement.volume !== 0 || audio.playSfx('playerHit') !== false) throw new Error('global mute did not disable music and SFX');
 audio.setEnabled(true);
+await audio.startMusic();
 if (bgmElement.paused) throw new Error('unmuting after unlock did not resume shared BGM');
 
 // 4. Procedural sound effects use Web Audio oscillators; they need no external SFX assets.
@@ -93,7 +99,8 @@ for (const id of requiredIds) {
 }
 if (!ui.includes('Audio.unlock()') || !ui.includes('setBgmVolume') || !ui.includes('setSfxVolume') || !ui.includes('setEnabled')) throw new Error('UI audio wiring incomplete');
 if (!game.includes('playSfx("playerAttack")') || !game.includes('playSfx("playerHit")') || !game.includes('playSfx("bossAppear")') || !game.includes('playSfx("bossDefeat")')) throw new Error('gameplay SFX hooks missing');
-if (!save.includes('const VERSION = 7') || !save.includes('bgmVolume: clamp') || !save.includes('audioEnabled: s.audioEnabled !== false')) throw new Error('audio settings schema V7 incomplete');
+if (!save.includes('const VERSION = 8') || !save.includes('bgmVolume: clamp') || !save.includes('audioEnabled: s.audioEnabled !== false')) throw new Error('audio settings schema V8 incomplete');
 if (!fs.existsSync(path.join(root, 'assets/audio/README.md'))) throw new Error('BGM asset placement instructions missing');
 if (fs.existsSync(path.join(root, 'assets/audio/bgm1.mp3'))) throw new Error('unexpected bundled MP3: supplied local file was not part of current chat upload');
-console.log('STAGE6.9 AUDIO REGRESSION TESTS PASSED: V4->V7 migration preserves old save, looped shared BGM path, autoplay unlock flow, volume mixing/mute, procedural WebAudio SFX, audio settings controls attack, selection-confirm, summon, vortex and Fortune ability sounds and gameplay hooks verified. NOTE: place the user-supplied bgm1.mp3 at assets/audio/bgm1.mp3 before deployment.');
+console.log('STAGE6.11 AUDIO REGRESSION TESTS PASSED: V4->V8 migration, asynchronous BGM preload gate, looped shared track, volume mixing/mute, procedural WebAudio SFX and gameplay hooks verified. NOTE: place the user-supplied bgm1.mp3 at assets/audio/bgm1.mp3 before deployment.');
+})().catch(error => { console.error(error); process.exitCode = 1; });

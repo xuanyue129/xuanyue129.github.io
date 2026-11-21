@@ -11,14 +11,16 @@
   };
 
   const state = {
-    masterVolume: 0.7,
-    bgmVolume: 0.35,
-    sfxVolume: 0.8,
+    masterVolume: 1,
+    bgmVolume: 0.15,
+    sfxVolume: 1,
     enabled: true,
     unlocked: false,
     musicRequested: false,
     scene: "menu",
     preloadPromise: null,
+    startPromise: null,
+    objectUrl: null,
     sourceReady: false,
     audioContext: null,
     resumePromise: null,
@@ -28,25 +30,42 @@
   };
 
   const bgmUrl = "./assets/audio/bgm1.mp3";
-  const bgm = new global.Audio(bgmUrl);
+  const bgm = new global.Audio();
   bgm.loop = true;
-  bgm.preload = "auto";
-  bgm.src = bgmUrl;
-  // 尽早让浏览器开始读取媒体资源；同时用 fetch 将 MP3 放入 HTTP 缓存，
-  // fetch 失败时仍由 HTMLAudioElement 的原始 URL 负责播放。
+  bgm.preload = "none";
+  // 先以 fetch 预取完整文件，再从 Blob URL 播放，避免 Audio 与 fetch 同时下载
+  // 同一个 MP3。若 fetch/Blob URL 不可用，则回退到普通媒体 URL。
+  function useFallbackSource() {
+    if (bgm.src) return;
+    bgm.src = bgmUrl;
+    bgm.preload = "auto";
+    try { bgm.load(); } catch (_) {}
+  }
   function preloadMusic() {
     if (state.preloadPromise) return state.preloadPromise;
-    try { bgm.load(); } catch (_) {}
-    if (typeof global.fetch !== "function") return Promise.resolve(false);
+    if (typeof global.fetch !== "function") {
+      useFallbackSource();
+      state.preloadPromise = Promise.resolve(false);
+      return state.preloadPromise;
+    }
     state.preloadPromise = global.fetch(bgmUrl, { cache: "force-cache", credentials: "same-origin" })
       .then(response => {
         if (!response.ok) throw new Error("BGM HTTP " + response.status);
-        state.sourceReady = true;
-        return response.arrayBuffer();
+        return response.blob();
       })
-      .then(() => true)
+      .then(blob => {
+        const urlApi = global.URL || global.webkitURL;
+        if (!urlApi || typeof urlApi.createObjectURL !== "function") throw new Error("Blob URL 不可用");
+        state.objectUrl = urlApi.createObjectURL(blob);
+        bgm.src = state.objectUrl;
+        bgm.preload = "auto";
+        try { bgm.load(); } catch (_) {}
+        state.sourceReady = true;
+        return true;
+      })
       .catch(error => {
-        console.info("[Audio] BGM 预加载未完成，将由媒体元素继续加载。", error);
+        console.info("[Audio] BGM 预加载未完成，将由媒体元素直接加载。", error);
+        useFallbackSource();
         return false;
       });
     return state.preloadPromise;
@@ -122,45 +141,59 @@
     return state.resumePromise;
   }
 
+  function musicSceneAllowed() {
+    return state.scene === "menu" || state.scene === "boss" || state.scene === "postBoss";
+  }
+
   function startMusic() {
     state.musicRequested = true;
-    if (!state.enabled || !state.unlocked || (state.scene !== "menu" && state.scene !== "boss")) return Promise.resolve(false);
-    syncMusicVolume();
-    try {
-      const result = bgm.play();
-      if (result && typeof result.then === "function") {
-        return result.then(() => true).catch(error => {
-          if (!state.missingBgmWarned) {
-            state.missingBgmWarned = true;
-            console.warn("[Audio] BGM 尚未播放。请确认 ./assets/audio/bgm1.mp3 存在，且网页通过 HTTP(S) 访问。", error);
-          }
-          return false;
-        });
-      }
+    if (!state.enabled || !state.unlocked || !musicSceneAllowed()) return Promise.resolve(false);
+    if (!bgm.paused && !bgm.ended) {
+      syncMusicVolume();
       return Promise.resolve(true);
-    } catch (error) {
-      return Promise.resolve(false);
     }
+    if (state.startPromise) return state.startPromise;
+    state.startPromise = preloadMusic().then(() => {
+      // 下载期间场景/静音状态可能已改变；二次检查以免在普通战斗中迟到播放。
+      if (!state.musicRequested || !state.enabled || !state.unlocked || !musicSceneAllowed()) return false;
+      syncMusicVolume();
+      return Promise.resolve(bgm.play()).then(() => true).catch(error => {
+        if (!state.missingBgmWarned) {
+          state.missingBgmWarned = true;
+          console.warn("[Audio] BGM 尚未播放。请确认 ./assets/audio/bgm1.mp3 存在，且网页通过 HTTP(S) 访问。", error);
+        }
+        return false;
+      });
+    }).catch(error => {
+      console.warn("[Audio] BGM 启动失败。", error);
+      return false;
+    }).then(result => {
+      state.startPromise = null;
+      return result;
+    });
+    return state.startPromise;
   }
 
   function unlock() {
     state.unlocked = true;
     resumeContext();
-    // 只有主界面或 Boss 战场景才在首次手势后开始 BGM。
-    if (state.scene === "menu" || state.scene === "boss") return startMusic();
+    // 只有主界面、Boss 战及首个 Boss 解锁后的战斗场景才开始 BGM。
+    if (state.scene === "menu" || state.scene === "boss" || state.scene === "postBoss") return startMusic();
     return Promise.resolve(false);
   }
 
   function setScene(scene) {
     state.scene = scene;
-    const shouldPlay = state.enabled && state.unlocked && (scene === "menu" || scene === "boss");
+    const shouldPlay = state.enabled && state.unlocked && (scene === "menu" || scene === "boss" || scene === "postBoss");
+    state.musicRequested = shouldPlay;
     if (shouldPlay) {
-      startMusic();
+      syncMusicVolume();
+      if (bgm.paused) return startMusic();
     } else {
-      state.musicRequested = false;
       if (!bgm.paused) bgm.pause();
-      // 保留播放位置，下一次进入 Boss / 主界面时自然续播，不重新请求媒体。
+      // 保留播放位置，首次 Boss 出现后及其后续场景可从当前位置继续播放。
     }
+    return Promise.resolve(false);
   }
 
   function playSfx(name) {
@@ -221,8 +254,9 @@
     state.enabled = Boolean(value);
     syncMusicVolume();
     if (!state.enabled) {
+      state.musicRequested = false;
       bgm.pause();
-    } else if (state.unlocked && (state.scene === "menu" || state.scene === "boss")) {
+    } else if (state.unlocked && musicSceneAllowed()) {
       startMusic();
     }
   }
@@ -236,10 +270,10 @@
     playSfx,
     playUi() { return playSfx("ui"); },
     testSfx() { return playSfx("levelUp"); },
-    setVolume(value) { state.masterVolume = clamp(value, 0.7); syncMusicVolume(); },
-    setMasterVolume(value) { state.masterVolume = clamp(value, 0.7); syncMusicVolume(); },
-    setBgmVolume(value) { state.bgmVolume = clamp(value, 0.35); syncMusicVolume(); },
-    setSfxVolume(value) { state.sfxVolume = clamp(value, 0.8); },
+    setVolume(value) { state.masterVolume = clamp(value, 1); syncMusicVolume(); },
+    setMasterVolume(value) { state.masterVolume = clamp(value, 1); syncMusicVolume(); },
+    setBgmVolume(value) { state.bgmVolume = clamp(value, 0.15); syncMusicVolume(); },
+    setSfxVolume(value) { state.sfxVolume = clamp(value, 1); },
     setEnabled,
     getVolume() { return state.masterVolume; },
     getBgmVolume() { return state.bgmVolume; },
@@ -252,7 +286,7 @@
   // 模块载入即预加载，不等待玩家点击“开始”。
   preloadMusic();
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && state.unlocked && state.enabled && (state.scene === "menu" || state.scene === "boss") && bgm.paused) startMusic();
+    if (!document.hidden && state.unlocked && state.enabled && musicSceneAllowed() && bgm.paused) startMusic();
   });
 
   global.FantasySurvivor = global.FantasySurvivor || {};

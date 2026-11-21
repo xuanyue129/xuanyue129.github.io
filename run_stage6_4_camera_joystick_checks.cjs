@@ -23,9 +23,9 @@ const app = fakeWindow.FantasySurvivor;
 const Game = app.Game;
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 
-// v3 legacy saves migrate to v7 and receive a safe default joystick position.
+// v3 legacy saves migrate to v8 and receive a safe default joystick position.
 const save = app.Save.normalize({ version:3, gold:7, settings:{ masterVolume:55, particles:true, screenShake:false } });
-assert(save.version === 7, 'save version did not migrate to v7');
+assert(save.version === 8, 'save version did not migrate to v8');
 assert(save.settings.joystickPosition.x === 0.86 && save.settings.joystickPosition.y === 0.78, 'legacy save joystick default incorrect');
 const clampedSave = app.Save.normalize({ version:4, settings:{ joystickPosition:{x:5,y:-1} } });
 assert(clampedSave.settings.joystickPosition.x === 0.92 && clampedSave.settings.joystickPosition.y === 0.1, 'saved joystick coordinates were not clamped');
@@ -81,4 +81,4 @@ assert(/this\.saveData\.settings\.joystickPosition = \{ \.\.\.this\.pendingJoyst
 const html = fs.readFileSync(path.join(root,'index.html'),'utf8');
 assert(/id=\"joystickPreviewArea\"/.test(html) && /id=\"joystickPreviewControl\"/.test(html), 'mobile joystick preview UI missing');
 
-console.log('STAGE6.4 CAMERA / JOYSTICK TESTS PASSED: v7 save migration, expanded world, centered camera, finite map edges, customizable mobile joystick position.');
+console.log('STAGE6.4 CAMERA / JOYSTICK TESTS PASSED: v8 save migration, expanded world, centered camera, finite map edges, customizable mobile joystick position.');

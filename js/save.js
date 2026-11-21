@@ -3,7 +3,7 @@
   "use strict";
   const STORAGE_KEY = "fantasy-survivor-save-v1";
   const BACKUP_KEY = "fantasy-survivor-save-backup-v1";
-  const VERSION = 7;
+  const VERSION = 8;
   const OFFLINE = Object.freeze({ maxHours: 8, baseGoldPerHour: 3, waveBonusPerHour: 1.25, goldMultiplier: 3, maxGold: 540 });
   const clamp = (v, min, max, fallback) => {
     const n = Number(v); return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
@@ -14,7 +14,7 @@
       gold: 0, shards: 0, prestigeCount: 0,
       permanentUpgrades: { offlineRate: 0, damage: 0, goldRate: 0, expRate: 0 },
       stats: { lifetimeKills: 0, bestSurvivalSeconds: 0, bestLevel: 1, bestWave: 1 },
-      settings: { masterVolume: 70, bgmVolume: 35, sfxVolume: 80, audioEnabled: true, particles: true, screenShake: true, joystickPosition: { x: 0.86, y: 0.78 } }
+      settings: { masterVolume: 100, bgmVolume: 15, sfxVolume: 100, audioEnabled: true, particles: true, screenShake: true, joystickPosition: { x: 0.86, y: 0.78 } }
     };
   }
   function migrate(data) {
@@ -59,6 +59,14 @@
       delete upgrades.maxHp;
       d = { ...d, permanentUpgrades: upgrades, version: 7, schemaVersion: 7 };
     }
+    if (oldVersion < 8) {
+      const settings = { ...(d.settings || {}) };
+      // 仅把旧版未改动的默认值迁移到新默认值，保留玩家主动调整过的音量。
+      if (Number(settings.masterVolume) === 70) settings.masterVolume = 100;
+      if (Number(settings.bgmVolume) === 35 || settings.bgmVolume == null) settings.bgmVolume = 15;
+      if (Number(settings.sfxVolume) === 80 || settings.sfxVolume == null) settings.sfxVolume = 100;
+      d = { ...d, settings, version: 8, schemaVersion: 8 };
+    }
     return d;
   }
   function normalize(data) {
@@ -71,9 +79,9 @@
       permanentUpgrades: { offlineRate: clamp(up.offlineRate,0,20,0), damage: clamp(up.damage,0,1000,0), goldRate: clamp(up.goldRate,0,1000,0), expRate: clamp(up.expRate,0,1000,0) },
       stats: { ...base.stats, ...st, lifetimeKills: clamp(st.lifetimeKills,0,1e12,0), bestSurvivalSeconds: clamp(st.bestSurvivalSeconds,0,1e9,0), bestLevel: clamp(st.bestLevel,1,1e6,1), bestWave: clamp(st.bestWave,1,1e6,1) },
       settings: {
-        masterVolume: clamp(s.masterVolume,0,100,70),
-        bgmVolume: clamp(s.bgmVolume,0,100,35),
-        sfxVolume: clamp(s.sfxVolume,0,100,80),
+        masterVolume: clamp(s.masterVolume,0,100,100),
+        bgmVolume: clamp(s.bgmVolume,0,100,15),
+        sfxVolume: clamp(s.sfxVolume,0,100,100),
         audioEnabled: s.audioEnabled !== false,
         particles: s.particles !== false, screenShake: s.screenShake !== false,
         joystickPosition: {

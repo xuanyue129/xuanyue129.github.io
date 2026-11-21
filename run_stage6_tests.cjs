@@ -92,7 +92,7 @@ if (!app.Upgrades.getEligibleCards(base).some(c=>c.id==='petChargeWidth')) throw
 
 // 6. Old save migration from v2: legacy permanent heart levels are converted to the new offline earnings upgrade.
 const migrated = app.Save.normalize({version:2,gold:100,permanentUpgrades:{maxHp:9,damage:2,goldRate:1,expRate:1},stats:{bestWave:3}});
-if (migrated.version !== 7 || migrated.permanentUpgrades.offlineRate !== 3 || Object.hasOwn(migrated.permanentUpgrades, 'maxHp')) throw new Error('save migration failed');
+if (migrated.version !== 8 || migrated.permanentUpgrades.offlineRate !== 3 || Object.hasOwn(migrated.permanentUpgrades, 'maxHp')) throw new Error('save migration failed');
 
 // 7. New-run defaults are three integer hearts and no pre-unlocked secondary mechanics.
 Game.setProgression({permanentUpgrades:{offlineRate:0,damage:0,goldRate:0,expRate:0}},1);

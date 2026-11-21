@@ -13,7 +13,7 @@
   const CONFIG = Object.freeze({
     player: {
       hp: 3,
-      speed: 240,
+      speed: 200,
       damage: 12,
       attackInterval: 0.85,
       attackRange: 280,
@@ -84,6 +84,8 @@
 
   const THEME_COLOR = "#70C8E8";
   const PROJECTILE_CRIT_COLOR = "#F0C56A";
+  // Half-neighborhood offsets: each adjacent cell pair is visited exactly once.
+  const SEPARATION_NEIGHBOR_OFFSETS = [[1, 0], [-1, 1], [0, 1], [1, 1]];
 
   const Game = {
     CONFIG,
@@ -107,13 +109,18 @@
     motes: [],
     enemies: [],
     projectiles: [],
+    enemyShots: [],
     drops: [],
     particles: [],
     vortices: [],
     enemyGrid: new Map(),
+    separationGrid: new Map(),
     nextEnemyId: 1,
     boss: null,
     bossActive: false,
+    bossMusicUnlocked: false,
+    postBossEnemyMode: false,
+    enemyModeSuppressionTimer: 0,
     bossQueue: [],
     bossBarriers: [],
     bossAnnouncement: "",
@@ -382,6 +389,9 @@
       this.pendingLevelUps = 0;
       this.boss = null;
       this.bossActive = false;
+      this.bossMusicUnlocked = false;
+      this.postBossEnemyMode = false;
+      this.enemyModeSuppressionTimer = 0;
       this.bossQueue = [];
       this.bossBarriers.length = 0;
       this.bossAnnouncement = "";
@@ -482,17 +492,23 @@
       const entities = global.FantasySurvivor.Entities;
       this.enemies.forEach((item) => entities.release("enemy", item));
       this.projectiles.forEach((item) => entities.release("projectile", item));
+      this.enemyShots.forEach((item) => entities.release("enemyProjectile", item));
       this.drops.forEach((item) => entities.release("drop", item));
       this.particles.forEach((item) => entities.release("particle", item));
       this.enemies.length = 0;
       this.projectiles.length = 0;
+      this.enemyShots.length = 0;
       this.drops.length = 0;
       this.particles.length = 0;
       this.vortices.length = 0;
       this.enemyGrid.clear();
+      this.separationGrid.clear();
       this.nextEnemyId = 1;
       this.boss = null;
       this.bossActive = false;
+      this.bossMusicUnlocked = false;
+      this.postBossEnemyMode = false;
+      this.enemyModeSuppressionTimer = 0;
       this.bossQueue = [];
       this.bossBarriers.length = 0;
       this.bossAnnouncement = "";
@@ -528,6 +544,7 @@
       if (!this.player || !this.active) return;
 
       this.elapsed += dt;
+      this.updatePostBossEnemyMode(dt);
       const wave = this.getWave();
       this.player.invuln = Math.max(0, this.player.invuln - dt);
       this.player.hitFlash = Math.max(0, this.player.hitFlash - dt);
@@ -536,11 +553,12 @@
       this.bossAnnouncementTimer = Math.max(0, this.bossAnnouncementTimer - dt);
       this.updatePlayerMovement(dt);
       this.updateEnemies(dt, wave);
+      this.updateEnemyProjectiles(dt);
       this.updateBossBarriers(dt);
       this.updateVortices(dt);
       this.updateFortuneAura(dt);
       this.updateFortuneTimedHealing(dt);
-      this.separateEnemyBodies(80);
+      this.separateEnemyBodies(20);
       this.rebuildEnemyGrid();
       this.updateAutoAttack(dt);
       this.updatePetAttacks(dt);
@@ -624,21 +642,132 @@
         const vx = p.x - enemy.x;
         const vy = p.y - enemy.y;
         const distance = Math.hypot(vx, vy) || 1;
-        enemy.vx = (vx / distance) * enemy.speed;
-        enemy.vy = (vy / distance) * enemy.speed;
+        const dirX = vx / distance;
+        const dirY = vy / distance;
+
+        if (enemy.specialMode === "suicide") {
+          if (enemy.fuseTimer >= 0) {
+            enemy.fuseTimer = Math.max(0, enemy.fuseTimer - dt);
+            enemy.vx = 0;
+            enemy.vy = 0;
+            if (enemy.fuseTimer <= 0) this.triggerSuicideExplosion(enemy);
+            continue;
+          }
+          const triggerDistance = p.radius + enemy.radius + 34;
+          if (distance <= triggerDistance) {
+            enemy.fuseTimer = 0.6;
+            enemy.vx = 0;
+            enemy.vy = 0;
+            continue;
+          }
+          enemy.vx = dirX * enemy.speed;
+          enemy.vy = dirY * enemy.speed;
+          enemy.x += enemy.vx * dt;
+          enemy.y += enemy.vy * dt;
+          continue;
+        }
+
+        if (enemy.specialMode === "ranged") {
+          enemy.rangedCooldown = Math.max(0, (enemy.rangedCooldown || 0) - dt);
+          if (distance > 255) {
+            enemy.vx = dirX * enemy.speed;
+            enemy.vy = dirY * enemy.speed;
+          } else if (distance < 165) {
+            enemy.vx = -dirX * enemy.speed * 0.72;
+            enemy.vy = -dirY * enemy.speed * 0.72;
+          } else {
+            enemy.vx = 0;
+            enemy.vy = 0;
+          }
+          enemy.x += enemy.vx * dt;
+          enemy.y += enemy.vy * dt;
+          if (distance <= 470 && enemy.rangedCooldown <= 0) {
+            this.spawnEnemyProjectile(enemy, dirX, dirY);
+            enemy.rangedCooldown = 1.9 + Math.random() * 0.65;
+          }
+          continue;
+        }
+
+        enemy.vx = dirX * enemy.speed;
+        enemy.vy = dirY * enemy.speed;
         enemy.x += enemy.vx * dt;
         enemy.y += enemy.vy * dt;
 
         const collisionDistance = p.radius + enemy.radius;
-        const contactDx = p.x - enemy.x;
-        const contactDy = p.y - enemy.y;
-        const contactDistance = Math.hypot(contactDx, contactDy) || 1;
-        if (contactDistance < collisionDistance && enemy.contactCooldown <= 0) {
+        if (distance < collisionDistance && enemy.contactCooldown <= 0) {
           enemy.contactCooldown = 0.72;
           this.damagePlayer(enemy.damage);
-          const push = (collisionDistance - contactDistance + 3) * 0.55;
-          enemy.x -= (contactDx / contactDistance) * push;
-          enemy.y -= (contactDy / contactDistance) * push;
+          const push = (collisionDistance - distance + 3) * 0.55;
+          enemy.x -= dirX * push;
+          enemy.y -= dirY * push;
+        }
+      }
+    },
+
+    updatePostBossEnemyMode(dt) {
+      if (!this.postBossEnemyMode || this.enemyModeSuppressionTimer <= 0) return;
+      this.enemyModeSuppressionTimer = Math.max(0, this.enemyModeSuppressionTimer - dt);
+      if (this.enemyModeSuppressionTimer <= 0.001) {
+        this.enemyModeSuppressionTimer = 0;
+        this.applyEnemyCombatModes(true);
+      }
+    },
+
+    applyEnemyCombatModes(specialEnabled) {
+      for (const enemy of this.enemies) {
+        if (enemy.dead || enemy.isBoss || enemy.isBossMinion) continue;
+        if (!Number.isFinite(enemy.baseSpeed)) enemy.baseSpeed = enemy.speed;
+        if (specialEnabled) {
+          if (!enemy.specialArchetype) {
+            if (enemy.kind === "normal") enemy.specialArchetype = Math.random() < 0.35 ? "ranged" : "chaser";
+            else if (enemy.kind === "fast") enemy.specialArchetype = "suicide";
+            else enemy.specialArchetype = "chaser";
+          }
+          enemy.specialMode = enemy.specialArchetype;
+          enemy.speed = enemy.specialMode === "suicide" ? enemy.baseSpeed * 1.65 : enemy.baseSpeed;
+          if (enemy.specialMode === "ranged" && !Number.isFinite(enemy.rangedCooldown)) enemy.rangedCooldown = 0.5 + Math.random() * 1.1;
+          if (enemy.specialMode === "suicide" && !Number.isFinite(enemy.fuseTimer)) enemy.fuseTimer = -1;
+        } else {
+          enemy.specialMode = null;
+          enemy.speed = enemy.baseSpeed;
+          enemy.fuseTimer = -1;
+        }
+      }
+    },
+
+    spawnEnemyProjectile(enemy, dirX, dirY) {
+      if (this.enemyShots.length >= 120) return false;
+      const entities = global.FantasySurvivor.Entities;
+      const speed = 295;
+      const shot = entities.acquire("enemyProjectile", {
+        x: enemy.x + dirX * (enemy.radius + 5),
+        y: enemy.y + dirY * (enemy.radius + 5),
+        vx: dirX * speed, vy: dirY * speed,
+        damage: 1, radius: 6, life: 3.5,
+        color: "#FF876F", dead: false
+      });
+      this.enemyShots.push(shot);
+      return true;
+    },
+
+    updateEnemyProjectiles(dt) {
+      const entities = global.FantasySurvivor.Entities;
+      const p = this.player;
+      for (let i = this.enemyShots.length - 1; i >= 0; i -= 1) {
+        const shot = this.enemyShots[i];
+        shot.life -= dt;
+        shot.x += shot.vx * dt;
+        shot.y += shot.vy * dt;
+        const dx = p.x - shot.x;
+        const dy = p.y - shot.y;
+        const hitRadius = p.radius + shot.radius;
+        if (dx * dx + dy * dy <= hitRadius * hitRadius) {
+          this.damagePlayer(shot.damage);
+          entities.release("enemyProjectile", this.enemyShots.splice(i, 1)[0]);
+          continue;
+        }
+        if (shot.life <= 0 || shot.x < -50 || shot.y < -50 || shot.x > this.arenaWidth + 50 || shot.y > this.arenaHeight + 50) {
+          entities.release("enemyProjectile", this.enemyShots.splice(i, 1)[0]);
         }
       }
     },
@@ -661,6 +790,8 @@
       this.enemies.length = 0;
       this.projectiles.forEach(shot => entities.release("projectile", shot));
       this.projectiles.length = 0;
+      this.enemyShots.forEach(shot => entities.release("enemyProjectile", shot));
+      this.enemyShots.length = 0;
       this.enemyGrid.clear();
       this.bossBarriers.length = 0;
 
@@ -694,6 +825,7 @@
         this.spawnBurst(boss.x, boss.y, "#C9A2FF", 42, 190);
       }
       this.bossActive = true;
+      this.bossMusicUnlocked = true;
       this.spawnTimer = Math.min(this.spawnTimer, 0.2);
       this.bossAnnouncement = bossCount > 1 ? `BOSS 来袭 · Lv.${level} ×${bossCount}` : `BOSS 来袭 · Lv.${level}`;
       this.bossAnnouncementTimer = 2.4;
@@ -864,6 +996,10 @@
       if (!boss || boss.dead) return;
       boss.dead = true;
       this.runKills += 1;
+      this.bossMusicUnlocked = true;
+      this.postBossEnemyMode = true;
+      this.enemyModeSuppressionTimer = 60;
+      this.applyEnemyCombatModes(false);
       this.spawnBurst(boss.x, boss.y, "#D3B4FF", 64, 230);
       playSfx("bossDefeat");
       this.spawnDrop(boss.x, boss.y, "exp", Math.max(35, Math.floor(boss.bossLevel * 5)));
@@ -982,53 +1118,83 @@
         else y = Math.random() * h;
       }
 
-      this.enemies.push(entities.acquire("enemy", {
+      const enemy = entities.acquire("enemy", {
         id: this.nextEnemyId++,
-        x, y, hp, maxHp: hp, speed, damage, radius, kind, color,
-        contactCooldown: 0, flash: 0, dead: false
-      }));
+        x, y, hp, maxHp: hp, speed, baseSpeed: speed, damage, radius, kind, color,
+        contactCooldown: 0, flash: 0, dead: false,
+        specialMode: null, specialArchetype: null, fuseTimer: -1, rangedCooldown: 0
+      });
+      this.enemies.push(enemy);
+      if (this.postBossEnemyMode && this.enemyModeSuppressionTimer <= 0) this.applyEnemyCombatModes(true);
     },
 
-    // 逐对推开相交的敌人。多轮松弛可处理一大群敌人挤在同一位置的情况。
-    separateEnemyBodies(iterations = 8) {
-      const active = this.enemies.filter(enemy => !enemy.dead && !enemy.isBoss);
-      if (active.length < 2) return;
-      const passes = Math.max(1, Math.min(80, iterations | 0));
+    // 逐对推开相交的敌人。空间网格只检查同格与相邻格，并最多执行 20 轮松弛，
+    // 可解开 Boss 与大量普通敌人出生/聚集时的密集重叠，同时避免全场无差别两两比较。
+    separateEnemyBodies(iterations = 20) {
+      const passes = Math.max(1, Math.min(20, iterations | 0));
+      const size = CONFIG.grid.cellSize;
+      const grid = this.separationGrid;
       for (let pass = 0; pass < passes; pass += 1) {
+        grid.clear();
+        for (const enemy of this.enemies) {
+          if (enemy.dead) continue;
+          const gx = Math.floor(enemy.x / size);
+          const gy = Math.floor(enemy.y / size);
+          const key = gx + "," + gy;
+          let bucket = grid.get(key);
+          if (!bucket) { bucket = []; grid.set(key, bucket); }
+          bucket.push(enemy);
+        }
         let moved = false;
-        for (let i = 0; i < active.length - 1; i += 1) {
-          const a = active[i];
-          for (let j = i + 1; j < active.length; j += 1) {
-            const b = active[j];
-            let dx = b.x - a.x;
-            let dy = b.y - a.y;
-            let distanceSq = dx * dx + dy * dy;
-            const minDistance = a.radius + b.radius + 1.25;
-            if (distanceSq >= minDistance * minDistance) continue;
+        const resolvePair = (a, b) => {
+          if (a.dead || b.dead) return;
+          let dx = b.x - a.x;
+          let dy = b.y - a.y;
+          const minDistance = a.radius + b.radius + 8;
+          const distSq = dx * dx + dy * dy;
+          if (distSq >= minDistance * minDistance) return;
+          let distance;
+          if (distSq < 0.0001) {
+            const angle = (((a.id || 1) * 97 + (b.id || 1) * 57) % 360) * Math.PI / 180;
+            dx = Math.cos(angle); dy = Math.sin(angle); distance = 1;
+          } else {
+            distance = Math.sqrt(distSq); dx /= distance; dy /= distance;
+          }
+          const overlap = minDistance - distance + 0.02;
+          const aStatic = a.isBoss || (a.specialMode === "suicide" && a.fuseTimer >= 0);
+          const bStatic = b.isBoss || (b.specialMode === "suicide" && b.fuseTimer >= 0);
+          if (aStatic && !bStatic) {
+            b.x += dx * overlap; b.y += dy * overlap;
+          } else if (bStatic && !aStatic) {
+            a.x -= dx * overlap; a.y -= dy * overlap;
+          } else {
+            const push = overlap * 0.5;
+            a.x -= dx * push; a.y -= dy * push;
+            b.x += dx * push; b.y += dy * push;
+          }
+          moved = true;
+        };
 
-            let distance;
-            if (distanceSq < 0.0001) {
-              // 同坐标时以实体 ID 产生稳定方向，避免随机抖动。
-              const angle = ((a.id * 97 + b.id * 57) % 360) * Math.PI / 180;
-              dx = Math.cos(angle);
-              dy = Math.sin(angle);
-              distance = 1;
-            } else {
-              distance = Math.sqrt(distanceSq);
-              dx /= distance;
-              dy /= distance;
-            }
-
-            const overlap = minDistance - distance;
-            const push = overlap * 0.51 + 0.015;
-            a.x -= dx * push;
-            a.y -= dy * push;
-            b.x += dx * push;
-            b.y += dy * push;
-            moved = true;
+        for (const [key, bucket] of grid) {
+          const comma = key.indexOf(",");
+          const gx = Number(key.slice(0, comma));
+          const gy = Number(key.slice(comma + 1));
+          for (let i = 0; i < bucket.length - 1; i += 1) {
+            for (let j = i + 1; j < bucket.length; j += 1) resolvePair(bucket[i], bucket[j]);
+          }
+          for (const [ox, oy] of SEPARATION_NEIGHBOR_OFFSETS) {
+            const adjacent = grid.get((gx + ox) + "," + (gy + oy));
+            if (!adjacent) continue;
+            for (const a of bucket) for (const b of adjacent) resolvePair(a, b);
           }
         }
         if (!moved) break;
+      }
+      for (const enemy of this.enemies) {
+        if (enemy.dead) continue;
+        const margin = enemy.radius + 2;
+        enemy.x = Math.max(margin, Math.min(this.arenaWidth - margin, enemy.x));
+        enemy.y = Math.max(margin, Math.min(this.arenaHeight - margin, enemy.y));
       }
     },
 
@@ -1394,12 +1560,20 @@
     },
 
     killEnemy(enemy) {
-      if (enemy.dead) return;
+      if (!enemy || enemy.dead) return;
       if (enemy.isBoss) {
         this.killBoss(enemy);
         return;
       }
+      if (enemy.specialMode === "suicide" && !enemy.exploded) {
+        this.triggerSuicideExplosion(enemy);
+        return;
+      }
       enemy.dead = true;
+      this.finalizeEnemyDefeat(enemy);
+    },
+
+    finalizeEnemyDefeat(enemy) {
       this.runKills += 1;
       playSfx("enemyDefeat");
       const p = this.player;
@@ -1415,15 +1589,41 @@
       }
       this.spawnDrop(enemy.x + (Math.random() - 0.5) * 12,
         enemy.y + (Math.random() - 0.5) * 12, "exp", enemy.kind === "elite" ? 12 : (enemy.kind === "fast" ? 6 : 5));
-
       if (Math.random() < CONFIG.drops.goldChance || enemy.kind === "elite") {
-        const value = enemy.kind === "elite"
-          ? 8 + Math.floor(Math.random() * 5)
-          : 1 + Math.floor(Math.random() * 3);
+        const value = enemy.kind === "elite" ? 8 + Math.floor(Math.random() * 5) : 1 + Math.floor(Math.random() * 3);
         this.awardGold(value);
       }
-
       this.spawnBurst(enemy.x, enemy.y, enemy.color, enemy.kind === "elite" ? 18 : 9, 80);
+    },
+
+    triggerSuicideExplosion(source) {
+      if (!source || source.dead || source.exploded) return false;
+      const radius = 112;
+      const radiusSq = radius * radius;
+      source.exploded = true;
+      source.dead = true;
+      this.spawnBurst(source.x, source.y, "#FFC66E", 42, 210);
+      if (this.screenShakeEnabled) {
+        this.shakeTime = Math.max(this.shakeTime, 0.18);
+        this.shakeStrength = Math.max(this.shakeStrength, 5);
+      }
+      const p = this.player;
+      if (p) {
+        const pdx = p.x - source.x;
+        const pdy = p.y - source.y;
+        if (pdx * pdx + pdy * pdy <= radiusSq) this.damagePlayer(1);
+      }
+      this.finalizeEnemyDefeat(source);
+      // 直接用近距离范围筛选，敌人上限有限；Boss 明确免疫此类爆炸。
+      const victims = this.enemies.slice();
+      for (const target of victims) {
+        if (!target || target === source || target.dead || target.isBoss) continue;
+        const dx = target.x - source.x;
+        const dy = target.y - source.y;
+        if (dx * dx + dy * dy > radiusSq) continue;
+        this.killEnemy(target);
+      }
+      return true;
     },
 
     removeDeadEnemies() {
@@ -1640,6 +1840,9 @@
         time: this.elapsed,
         buffs: this.player.buffCount || 0,
         bossActive: Boolean(this.bossActive),
+        bossMusicUnlocked: Boolean(this.bossMusicUnlocked),
+        gameOver: Boolean(this.gameOverHandled),
+        enemyModeSuppressionTimer: this.enemyModeSuppressionTimer,
         bossLevel: this.boss ? this.boss.bossLevel : 0,
         bossHp: this.boss ? this.boss.hp : 0,
         bossMaxHp: this.boss ? this.boss.maxHp : 0
@@ -1802,6 +2005,7 @@
       this.drawFortuneAura(ctx, time);
       this.drawBossHazards(ctx, time);
       this.drawEnemies(ctx);
+      this.drawEnemyProjectiles(ctx);
       this.drawProjectiles(ctx);
       this.drawPlayer(ctx, time);
       this.drawPets(ctx, time);
@@ -1914,6 +2118,17 @@
         ctx.stroke();
         }
 
+        if (!enemy.isBoss && enemy.specialMode === "ranged") {
+          ctx.strokeStyle = "rgba(255,205,160,.88)";
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(0, 0, enemy.radius + 4, 0, Math.PI * 2); ctx.stroke();
+        }
+        if (!enemy.isBoss && enemy.specialMode === "suicide") {
+          const fuse = enemy.fuseTimer >= 0 ? Math.max(0, enemy.fuseTimer / 0.6) : 1;
+          ctx.strokeStyle = enemy.fuseTimer >= 0 ? `rgba(255,${Math.floor(105 + 100 * fuse)},85,.95)` : "rgba(255,205,105,.78)";
+          ctx.lineWidth = 2.5;
+          ctx.beginPath(); ctx.arc(0, 0, enemy.radius + 5 + (1 - fuse) * 4, 0, Math.PI * 2); ctx.stroke();
+        }
         if (!enemy.isBoss && (enemy.hp < enemy.maxHp || enemy.kind === "elite" || enemy.kind === "bossElite")) {
           const barWidth = enemy.radius * 2.4;
           ctx.fillStyle = "rgba(4,10,18,.75)";
@@ -2016,6 +2231,23 @@
         ctx.fillText(this.bossAnnouncement, this.viewWidth / 2, y + 17, width - 16);
         ctx.restore();
       }
+    },
+
+    drawEnemyProjectiles(ctx) {
+      if (!this.enemyShots.length) return;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      for (const shot of this.enemyShots) {
+        const gradient = ctx.createRadialGradient(shot.x, shot.y, 0, shot.x, shot.y, shot.radius * 3.4);
+        gradient.addColorStop(0, "#FFF4E9");
+        gradient.addColorStop(0.32, shot.color);
+        gradient.addColorStop(1, "rgba(255,110,80,0)");
+        ctx.fillStyle = gradient;
+        ctx.beginPath(); ctx.arc(shot.x, shot.y, shot.radius * 3.4, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = shot.color;
+        ctx.beginPath(); ctx.arc(shot.x, shot.y, shot.radius, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
     },
 
     drawProjectiles(ctx) {

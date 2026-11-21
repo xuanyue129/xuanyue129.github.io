@@ -5,6 +5,7 @@
   const LIMITS = {
     enemy: 180,
     projectile: 260,
+    enemyProjectile: 180,
     drop: 260,
     particle: 900
   };
@@ -12,6 +13,7 @@
   const pools = {
     enemy: [],
     projectile: [],
+    enemyProjectile: [],
     drop: [],
     particle: []
   };
@@ -27,6 +29,10 @@
       type: "projectile", x: 0, y: 0, vx: 0, vy: 0,
       damage: 12, radius: 5, life: 1.2, color: "#70C8E8",
       isCritical: false, pierceRemaining: 0, hitEnemies: [], dead: false
+    },
+    enemyProjectile: {
+      type: "enemyProjectile", x: 0, y: 0, vx: 0, vy: 0,
+      damage: 1, radius: 6, life: 4, color: "#FF9A78", dead: false
     },
     drop: {
       type: "drop", x: 0, y: 0, vx: 0, vy: 0,
@@ -72,7 +78,7 @@
       vy: 0,
       hp: 100,
       maxHp: 100,
-      speed: 240,
+      speed: 200,
       damage: 12,
       attackInterval: 0.85,
       attackTimer: 0.25,
@@ -100,6 +106,7 @@
       return {
         enemy: pools.enemy.length,
         projectile: pools.projectile.length,
+        enemyProjectile: pools.enemyProjectile.length,
         drop: pools.drop.length,
         particle: pools.particle.length
       };

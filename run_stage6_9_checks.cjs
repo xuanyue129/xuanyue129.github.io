@@ -33,7 +33,7 @@ const assert = (ok, message) => { if (!ok) throw new Error(message); };
 assert(!Object.hasOwn(app.Upgrades.CONFIG.shop, 'maxHp'), 'permanent max HP upgrade still exists');
 assert(Object.hasOwn(app.Upgrades.CONFIG.shop, 'offlineRate'), 'offline earnings upgrade missing');
 const oldV6 = app.Save.normalize({ version: 6, permanentUpgrades: { maxHp: 4, damage: 2, goldRate: 1, expRate: 0 } });
-assert(oldV6.version === 7 && oldV6.permanentUpgrades.offlineRate === 4, 'V6 permanent heart upgrade was not migrated to offline multiplier');
+assert(oldV6.version === 8 && oldV6.permanentUpgrades.offlineRate === 4, 'V6 permanent heart upgrade was not migrated to offline multiplier');
 assert(!Object.hasOwn(oldV6.permanentUpgrades, 'maxHp'), 'legacy permanent maxHp remained in normalized save');
 
 // Offline earnings multiplier applies to calculated offline coins and is preserved in reward summary.
