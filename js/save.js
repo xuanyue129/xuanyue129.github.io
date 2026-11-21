@@ -1,9 +1,9 @@
-/* 阶段6存档：v3 版本迁移、备份、自动保存与离线收益结算。 */
+/* 阶段6存档：版本迁移、备份、自动保存与离线收益结算。 */
 (function (global) {
   "use strict";
   const STORAGE_KEY = "fantasy-survivor-save-v1";
   const BACKUP_KEY = "fantasy-survivor-save-backup-v1";
-  const VERSION = 5;
+  const VERSION = 7;
   const OFFLINE = Object.freeze({ maxHours: 8, baseGoldPerHour: 3, waveBonusPerHour: 1.25, goldMultiplier: 3, maxGold: 540 });
   const clamp = (v, min, max, fallback) => {
     const n = Number(v); return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
@@ -12,9 +12,9 @@
     return {
       version: VERSION, schemaVersion: VERSION, updatedAt: Date.now(), lastSeenAt: Date.now(),
       gold: 0, shards: 0, prestigeCount: 0,
-      permanentUpgrades: { maxHp: 0, damage: 0, goldRate: 0, expRate: 0 },
+      permanentUpgrades: { offlineRate: 0, damage: 0, goldRate: 0, expRate: 0 },
       stats: { lifetimeKills: 0, bestSurvivalSeconds: 0, bestLevel: 1, bestWave: 1 },
-      settings: { masterVolume: 70, bgmVolume: 70, sfxVolume: 80, audioEnabled: true, particles: true, screenShake: true, joystickPosition: { x: 0.86, y: 0.78 } }
+      settings: { masterVolume: 70, bgmVolume: 35, sfxVolume: 80, audioEnabled: true, particles: true, screenShake: true, joystickPosition: { x: 0.86, y: 0.78 } }
     };
   }
   function migrate(data) {
@@ -45,6 +45,20 @@
       settings.audioEnabled = settings.audioEnabled !== false;
       d = { ...d, settings, version: 5, schemaVersion: 5 };
     }
+    if (oldVersion < 6) {
+      const settings = { ...(d.settings || {}) };
+      // 降低 BGM：将已有用户的背景音乐滑块值减半，保留其总音量与音效设置。
+      const previousBgm = Number(settings.bgmVolume);
+      settings.bgmVolume = Number.isFinite(previousBgm) ? Math.round(previousBgm * 0.5) : 35;
+      d = { ...d, settings, version: 6, schemaVersion: 6 };
+    }
+    if (oldVersion < 7) {
+      const upgrades = { ...(d.permanentUpgrades || {}) };
+      // 原“初始生命上限”永久升级改为“离线收益倍率”，将旧等级等比例继承，避免旧存档投入归零。
+      upgrades.offlineRate = upgrades.offlineRate == null ? (Number(upgrades.maxHp) || 0) : upgrades.offlineRate;
+      delete upgrades.maxHp;
+      d = { ...d, permanentUpgrades: upgrades, version: 7, schemaVersion: 7 };
+    }
     return d;
   }
   function normalize(data) {
@@ -54,11 +68,11 @@
       ...base, ...d, version: VERSION, schemaVersion: VERSION,
       gold: clamp(d.gold, 0, 1e12, 0), shards: clamp(d.shards, 0, 1e9, 0),
       prestigeCount: clamp(d.prestigeCount, 0, 1e9, 0),
-      permanentUpgrades: { maxHp: clamp(up.maxHp,0,10,0), damage: clamp(up.damage,0,1000,0), goldRate: clamp(up.goldRate,0,1000,0), expRate: clamp(up.expRate,0,1000,0) },
+      permanentUpgrades: { offlineRate: clamp(up.offlineRate,0,20,0), damage: clamp(up.damage,0,1000,0), goldRate: clamp(up.goldRate,0,1000,0), expRate: clamp(up.expRate,0,1000,0) },
       stats: { ...base.stats, ...st, lifetimeKills: clamp(st.lifetimeKills,0,1e12,0), bestSurvivalSeconds: clamp(st.bestSurvivalSeconds,0,1e9,0), bestLevel: clamp(st.bestLevel,1,1e6,1), bestWave: clamp(st.bestWave,1,1e6,1) },
       settings: {
         masterVolume: clamp(s.masterVolume,0,100,70),
-        bgmVolume: clamp(s.bgmVolume,0,100,70),
+        bgmVolume: clamp(s.bgmVolume,0,100,35),
         sfxVolume: clamp(s.sfxVolume,0,100,80),
         audioEnabled: s.audioEnabled !== false,
         particles: s.particles !== false, screenShake: s.screenShake !== false,
@@ -88,8 +102,9 @@
     const now = Date.now();
     const elapsedHours = Math.min(OFFLINE.maxHours, Math.max(0, (now - data.lastSeenAt) / 3600000));
     const wave = Math.max(1, data.stats.bestWave || 1);
-    const offlineGold = Math.min(OFFLINE.maxGold, Math.floor(elapsedHours * (OFFLINE.baseGoldPerHour + (wave - 1) * OFFLINE.waveBonusPerHour) * OFFLINE.goldMultiplier));
-    data.offlineReward = { hours: elapsedHours, gold: offlineGold, wave };
+    const offlineRateMultiplier = 1 + Math.max(0, Number(data.permanentUpgrades.offlineRate) || 0) * 0.10;
+    const offlineGold = Math.min(OFFLINE.maxGold, Math.floor(elapsedHours * (OFFLINE.baseGoldPerHour + (wave - 1) * OFFLINE.waveBonusPerHour) * OFFLINE.goldMultiplier * offlineRateMultiplier));
+    data.offlineReward = { hours: elapsedHours, gold: offlineGold, wave, multiplier: offlineRateMultiplier };
     data.gold += offlineGold;
     data.lastSeenAt = now;
     save(data);

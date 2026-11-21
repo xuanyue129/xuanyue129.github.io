@@ -1521,3 +1521,81 @@ body:not(.about-body) .game-screen {
 @media (pointer: coarse), (max-width: 900px) {
   body.mobile-site-mode .game-screen .arena-help { display: none; }
 }
+
+/* Stage 6.8：升级重抽与 Boss 宝箱奖励 */
+.upgrade-actions{display:flex;align-items:center;justify-content:center;gap:18px;margin:20px auto 0;color:var(--text-secondary);font-size:12px}
+.upgrade-actions strong{margin-left:5px;color:var(--gold-bright);font-family:var(--font-numeric);font-size:15px}
+.upgrade-actions .menu-button{min-height:38px;padding:7px 22px;font-size:12px}
+.upgrade-actions .menu-button:disabled{opacity:.38;cursor:not-allowed;transform:none;box-shadow:none}
+.chest-reward-backdrop{z-index:34}
+.chest-reward-modal{width:min(900px,100%);text-align:center}
+.chest-reward-modal .modal-description{margin-left:auto;margin-right:auto}
+.chest-reward-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:18px}
+.chest-reward-card{min-height:190px;--rarity:#F3CD78;--path-color:#F3CD78}
+.chest-reward-card strong{font-size:17px}
+@media(max-width:650px){
+  .upgrade-actions{gap:12px;margin-top:13px}
+  .upgrade-actions .menu-button{min-height:36px;padding:6px 15px}
+  .chest-reward-grid{grid-template-columns:1fr;gap:8px;margin-top:12px}
+  .chest-reward-card{min-height:84px;grid-template-columns:48px 1fr;grid-template-rows:auto auto;justify-items:start;column-gap:12px;padding:10px 13px;text-align:left}
+  .chest-reward-card .upgrade-icon{grid-row:1/3;width:42px;height:42px;font-size:21px}
+  .chest-reward-card strong{align-self:end;font-size:15px}
+  .chest-reward-card small{align-self:start}
+}
+
+/* Stage 6.10：界面进入动效，尊重系统减少动态效果设置。 */
+.screen-enter {
+  animation: screen-arrive 520ms cubic-bezier(.18,.72,.22,1) both;
+  transform-origin: 50% 50%;
+}
+.modal-backdrop.ui-enter {
+  animation: backdrop-arrive 240ms ease-out both;
+}
+.modal-backdrop.ui-enter .modal-panel {
+  animation: panel-arrive 420ms cubic-bezier(.16,.78,.24,1.08) both;
+}
+.menu-content { will-change: transform, opacity; }
+.menu-screen.screen-enter .menu-content {
+  animation: menu-content-arrive 680ms cubic-bezier(.18,.72,.22,1) both;
+}
+.upgrade-backdrop.ui-enter .upgrade-card,
+.chest-reward-backdrop.ui-enter .chest-reward-card {
+  animation: card-arrive 440ms cubic-bezier(.18,.72,.22,1) both;
+}
+.upgrade-backdrop.ui-enter .upgrade-card:nth-child(2),
+.chest-reward-backdrop.ui-enter .chest-reward-card:nth-child(2) { animation-delay: 65ms; }
+.upgrade-backdrop.ui-enter .upgrade-card:nth-child(3),
+.chest-reward-backdrop.ui-enter .chest-reward-card:nth-child(3) { animation-delay: 130ms; }
+.menu-button, .upgrade-card, .icon-button {
+  transition: transform 180ms cubic-bezier(.2,.7,.2,1), filter 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+.menu-button:active, .upgrade-card:active { transform: translateY(1px) scale(.985); }
+@keyframes screen-arrive {
+  from { opacity: 0; transform: translateY(10px) scale(.992); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes backdrop-arrive { from { opacity: 0; } to { opacity: 1; } }
+@keyframes panel-arrive {
+  from { opacity: 0; transform: translateY(22px) scale(.965); filter: blur(5px); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+@keyframes menu-content-arrive {
+  from { opacity: 0; transform: translateY(18px); filter: blur(4px); }
+  to { opacity: 1; transform: translateY(-1.5%); filter: blur(0); }
+}
+@keyframes card-arrive {
+  from { opacity: 0; transform: translateY(16px) scale(.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .screen-enter, .modal-backdrop.ui-enter, .modal-backdrop.ui-enter .modal-panel,
+  .menu-screen.screen-enter .menu-content, .upgrade-backdrop.ui-enter .upgrade-card,
+  .chest-reward-backdrop.ui-enter .chest-reward-card { animation: none !important; }
+  .menu-button, .upgrade-card, .icon-button { transition: none !important; }
+}
+
+.modal-backdrop.ui-exit { animation: backdrop-leave 160ms ease-in both; pointer-events: none; }
+.modal-backdrop.ui-exit .modal-panel { animation: panel-leave 160ms ease-in both; }
+@keyframes backdrop-leave { to { opacity: 0; } }
+@keyframes panel-leave { to { opacity: 0; transform: translateY(10px) scale(.985); filter: blur(2px); } }
+@media (prefers-reduced-motion: reduce) { .modal-backdrop.ui-exit, .modal-backdrop.ui-exit .modal-panel { animation: none !important; } }

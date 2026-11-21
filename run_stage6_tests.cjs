@@ -56,7 +56,7 @@ if (!(Game.enemies[0].hp < 100 && Game.enemies[1].hp < 100 && Game.enemies[2].hp
 }
 
 // 3. Fortune unlock: getting hit starts aura; nearby enemies take continuous damage.
-Game.player = app.Entities.createPlayer({x:200,y:200,hp:3,maxHp:3,invuln:0,fortuneUnlocked:true,fortuneAuraTimer:0,fortuneAuraDuration:4,fortuneRadius:100,fortuneDamage:10,fortuneKillHealEvery:Infinity,fortuneRegenInterval:Infinity});
+Game.player = app.Entities.createPlayer({x:200,y:200,hp:3,maxHp:3,invuln:0,fortuneUnlocked:true,fortuneAuraTimer:0,fortuneAuraDuration:4,fortuneRadius:100,fortuneDamage:0.1,fortuneKillHealEvery:Infinity,fortuneRegenInterval:Infinity});
 Game.enemies = [app.Entities.createEnemy({id:7,x:250,y:200,hp:100,maxHp:100,radius:10,dead:false})];
 Game.active = true;
 Game.damagePlayer(50);
@@ -90,12 +90,12 @@ if (app.Upgrades.CARDS.some(c=>['vitality','regeneration','healing'].includes(c.
 base.petCount=1; base.petChargeWidth=28; base.petChargeDistance=220; base.petChargeInterval=1.35; base.petChargeSpeed=900; base.vortexUnlocked=true; base.fortuneUnlocked=true;
 if (!app.Upgrades.getEligibleCards(base).some(c=>c.id==='petChargeWidth')) throw new Error('pet charge width upgrade missing');
 
-// 6. Old save migration from v2 heart-HP progression to v5 (including joystick and audio settings) heart progression.
+// 6. Old save migration from v2: legacy permanent heart levels are converted to the new offline earnings upgrade.
 const migrated = app.Save.normalize({version:2,gold:100,permanentUpgrades:{maxHp:9,damage:2,goldRate:1,expRate:1},stats:{bestWave:3}});
-if (migrated.version !== 5 || migrated.permanentUpgrades.maxHp !== 3) throw new Error('save migration failed');
+if (migrated.version !== 7 || migrated.permanentUpgrades.offlineRate !== 3 || Object.hasOwn(migrated.permanentUpgrades, 'maxHp')) throw new Error('save migration failed');
 
 // 7. New-run defaults are three integer hearts and no pre-unlocked secondary mechanics.
-Game.setProgression({permanentUpgrades:{maxHp:0,damage:0,goldRate:0,expRate:0}},1);
+Game.setProgression({permanentUpgrades:{offlineRate:0,damage:0,goldRate:0,expRate:0}},1);
 Game.arenaWidth=800; Game.arenaHeight=600; Game.start();
 if (Game.player.hp !== 3 || Game.player.maxHp !== 3 || Game.player.petCount !== 0 || Game.player.fortuneUnlocked) throw new Error('run initial state is not three hearts / locked paths');
 Game.stop();

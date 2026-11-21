@@ -50,7 +50,7 @@ Game.spawnVortices({x:Game.player.x+80,y:Game.player.y});
 if (Game.vortices[Game.vortices.length-1].duration !== 1) throw new Error('vortex default duration incorrect');
 Game.vortices.length = 0;
 
-// Reaching level 10 clears small monsters, spawns one large boss and pauses normal spawning.
+// Reaching level 10 clears small monsters, spawns one large boss and resumes normal spawning.
 Game.enemies = [app.Entities.createEnemy({id:900,x:80,y:80,hp:50,maxHp:50,radius:13,kind:'normal',dead:false})];
 Game.rebuildEnemyGrid();
 Game.player.level = 9;
@@ -65,7 +65,8 @@ if (Game.boss.radius <= 40) throw new Error('boss size is not larger than regula
 Game.paused = false;
 Game.spawnTimer = 0;
 Game.updateEnemies(0.05, 1);
-if (Game.enemies.some(e => !e.isBoss && !e.isBossMinion)) throw new Error('normal enemies spawned during boss fight');
+if (!Game.enemies.some(e => !e.isBoss && !e.isBossMinion)) throw new Error('normal enemies did not spawn during boss fight');
+if (Game.CONFIG.boss.chargeDistance !== 190) throw new Error('boss base charge distance was not halved');
 
 // Boss charge uses a telegraph and its movement line can damage the player.
 Game.player.x = Game.boss.x + 60;
@@ -97,13 +98,14 @@ if (Game.player.hp !== 3) throw new Error('fortune invulnerability did not block
 Game.boss.bossMode = 'idle';
 Game.spawnBossMinions(Game.boss);
 const minions = Game.enemies.filter(e => e.isBossMinion);
-const baseEliteSpeed = Game.CONFIG.enemy.eliteSpeed + (Game.getWave()-1)*1.5;
+const baseEliteSpeed = (Game.CONFIG.enemy.eliteSpeed + (Game.getWave()-1)*1.5) * 1.5;
 if (minions.length !== 3 || minions.some(e => e.speed !== baseEliteSpeed * 2 || e.kind !== 'bossElite' || e.color !== '#B56BFF')) throw new Error('boss minion summon invalid');
 
 // Killing the boss removes its summoned minions and allows normal enemy spawning again.
 const bossRef = Game.boss;
 Game.killEnemy(bossRef);
 if (Game.bossActive || Game.boss !== null || !minions.every(e => e.dead)) throw new Error('boss defeat cleanup failed');
+if (!Game.drops.some(d => d.kind === 'chest')) throw new Error('boss defeat did not drop a treasure chest');
 Game.removeDeadEnemies();
 Game.spawnTimer = 0;
 Game.updateEnemies(0.05, 1);
@@ -116,4 +118,4 @@ let keyPrevented = false;
 Game.handleKeyDown({code:'KeyJ',repeat:false,preventDefault(){keyPrevented=true;}});
 if (!keyPrevented || Game.enemies.some(e => !e.dead)) throw new Error('J keydown did not clear-screen kill');
 
-console.log('STAGE6.3 BOSS TESTS PASSED: fortune invulnerability, 1s defaults, level-10 boss, no normal spawns during boss, charge, electric barrier, triple 2x-speed purple minions, post-boss respawn, J clear-screen cheat.');
+console.log('STAGE6.8 BOSS REGRESSION TESTS PASSED: fortune invulnerability, 1s defaults, level-10 boss, normal spawns during boss, halved charge range, boss treasure drop, electric barrier, triple 2x-speed purple minions, post-boss respawn, J clear-screen cheat.');

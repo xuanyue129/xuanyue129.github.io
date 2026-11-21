@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#07111F">
-  <meta name="description" content="米饭的自我救赎——随机升级构筑、宠物冲撞与大运反击的生存游戏。">
+  <meta name="description" content="米饭的自我救赎——随机升级构筑、召唤物冲撞与大运反击的生存游戏。">
   <title>米饭的自我救赎</title>
   <link rel="stylesheet" href="./styles.css">
   <script defer src="./js/save.js"></script>
@@ -107,7 +107,7 @@
         <div class="hud hud-bottom">
           <div class="demo-controls">
             <span>移动：WASD / 方向键</span>
-            <small>击败敌人收集星辉经验；升级随机出现射击、宠物、聚怪流派词条，逐步构筑你的专精</small>
+            <small>击败敌人收集星辉经验；升级随机出现射击、召唤物、聚怪流派词条，逐步构筑你的专精</small>
           </div>
           <div class="buff-count">已选祝福 <strong id="hudBuffs">0</strong></div>
         </div>
@@ -117,7 +117,7 @@
     <footer class="site-footer">
       <span>米饭的自我救赎</span>
       <span class="footer-separator">✧</span>
-      <span>LOCAL BUILD · V0.6.6</span>
+      <span>LOCAL BUILD · V0.6.7</span>
     </footer>
   </div>
 
@@ -133,7 +133,7 @@
       </div>
       <div class="setting-row">
         <div><strong>背景音乐</strong><small>主菜单与战斗共用循环 BGM</small></div>
-        <label class="range-wrap"><input id="bgmVolumeInput" type="range" min="0" max="100" step="1" value="70"><output id="bgmVolumeOutput">70%</output></label>
+        <label class="range-wrap"><input id="bgmVolumeInput" type="range" min="0" max="100" step="1" value="35"><output id="bgmVolumeOutput">35%</output></label>
       </div>
       <div class="setting-row">
         <div><strong>游戏音效</strong><small>攻击、受击、升级与 Boss 提示</small></div>
@@ -143,6 +143,7 @@
         <div><strong>启用音频</strong><small>一键静音背景音乐和所有音效</small></div>
         <label class="switch"><input id="audioEnabledInput" type="checkbox" checked aria-label="启用背景音乐和游戏音效"><span></span></label>
       </div>
+      <div class="setting-row"><div><strong>音效测试</strong><small>播放一段提示音，确认音效通道正常</small></div><button class="shop-buy" type="button" data-action="test-audio">试听音效</button></div>
       <p class="modal-footnote">浏览器限制自动播放。首次点击或按键后，背景音乐会开始循环；若没有 BGM，请确认已放入 assets/audio/bgm1.mp3。</p>
       <div class="setting-row">
         <div><strong>粒子特效</strong><small>控制背景与战斗粒子</small></div>
@@ -211,11 +212,24 @@
     <section class="modal-panel upgrade-modal" role="dialog" aria-modal="true" aria-labelledby="upgradeTitle">
       <p class="eyebrow">BLESSING OF THE STARS</p><h2 id="upgradeTitle">等级提升</h2><p id="upgradeSubtitle" class="modal-description">选择一项祝福，继续试炼</p>
       <div id="upgradeCards" class="upgrade-cards"></div>
+      <div class="upgrade-actions"><span>剩余刷新次数：<strong id="upgradeRefreshCount">5</strong></span><button id="upgradeRefreshButton" class="menu-button compact-button" type="button" data-action="refresh-upgrade">刷新词条</button></div>
+    </section>
+  </div>
+  <!-- Boss 宝箱奖励 -->
+  <div id="chestRewardModal" class="modal-backdrop chest-reward-backdrop" hidden>
+    <section class="modal-panel chest-reward-modal" role="dialog" aria-modal="true" aria-labelledby="chestRewardTitle">
+      <p class="eyebrow">BOSS TREASURE</p><h2 id="chestRewardTitle">Boss 宝箱</h2>
+      <p class="modal-description">拾取宝箱成功。选择一项奖励，继续你的冒险。</p>
+      <div class="chest-reward-grid">
+        <button class="upgrade-card chest-reward-card" type="button" data-action="chest-reward" data-reward="heal" style="--rarity:#F08B91;--path-color:#F08B91"><span class="upgrade-icon">♥</span><strong>生命补给</strong><small>立即恢复 2 颗心，不超过生命上限</small></button>
+        <button class="upgrade-card chest-reward-card" type="button" data-action="chest-reward" data-reward="triple" style="--rarity:#C49AFF;--path-color:#C49AFF"><span class="upgrade-icon">✦</span><strong>星辉连选</strong><small>下次选择词条时，连续进行 3 次强化选择</small></button>
+        <button class="upgrade-card chest-reward-card" type="button" data-action="chest-reward" data-reward="refresh" style="--rarity:#F3CD78;--path-color:#F3CD78"><span class="upgrade-icon">↻</span><strong>灵感重铸</strong><small>额外获得 3 次刷新词条机会</small></button>
+      </div>
     </section>
   </div>
   <!-- 永久商店 -->
   <div id="shopModal" class="modal-backdrop" hidden><section class="modal-panel progression-modal" role="dialog" aria-modal="true" aria-labelledby="shopTitle">
-    <button class="modal-close" type="button" data-action="close-shop" aria-label="关闭">×</button><p class="eyebrow">SANCTUARY OF GROWTH</p><h2 id="shopTitle">永久升级</h2><p class="modal-description">消耗金币强化每次冒险的初始属性。价格按等级指数增长。</p>
+    <button class="modal-close" type="button" data-action="close-shop" aria-label="关闭">×</button><p class="eyebrow">SANCTUARY OF GROWTH</p><h2 id="shopTitle">永久升级</h2><p class="modal-description">消耗金币强化冒险收益与初始战斗能力。离线收益升级可提高离线金币倍率，价格按等级指数增长。</p>
     <div class="shop-wallet">持有金币 <strong id="shopGold">0</strong></div><div id="shopCards" class="shop-cards"></div>
   </section></div>
   <!-- 转生 -->

@@ -74,7 +74,7 @@
       attackInterval: 2.25,
       chargeTell: 0.82,
       chargeSpeed: 690,
-      chargeDistance: 760,
+      chargeDistance: 190,
       barrierTell: 0.9,
       barrierDuration: 3.4,
       barrierCooldown: 0.75,
@@ -394,7 +394,7 @@
       this.resize();
       const permanent = (this.saveData && this.saveData.permanentUpgrades) || {};
       const shardMultiplier = this.shardMultiplier || 1;
-      const startingHearts = Math.max(3, Math.min(20, Math.floor((3 + (permanent.maxHp || 0)) * shardMultiplier)));
+      const startingHearts = Math.max(3, Math.min(20, Math.floor(3 * shardMultiplier)));
       const startingDamage = (CONFIG.player.damage + (permanent.damage || 0) * 1.5) * shardMultiplier;
       this.player = global.FantasySurvivor.Entities.createPlayer({
         x: this.arenaWidth / 2,
@@ -416,6 +416,8 @@
         ricochetChance: 0, critChance: 0, critMultiplier: 1.8,
         damageReduction: 0,
         buffCount: 0,
+        upgradeRefreshes: 5,
+        triplePickPending: false,
         petCount: 0,
         petDamage: startingDamage * 0.9,
         petChargeDistance: 220,
@@ -430,7 +432,7 @@
         vortexCount: 1, vortexDamage: 8, vortexRadius: 102,
         vortexDuration: 1.0, vortexPullStrength: 190,
         fortuneUnlocked: false,
-        fortuneDamage: 7,
+        fortuneDamage: 0.12,
         fortuneRadius: 100,
         fortuneAuraDuration: 1.0,
         fortuneAuraTimer: 0,
@@ -596,16 +598,15 @@
     },
 
     updateEnemies(dt, wave) {
-      if (!this.bossActive) {
-        this.spawnTimer -= dt;
-        if (this.spawnTimer <= 0 && this.enemies.length < CONFIG.spawn.maxEnemies) {
-          this.spawnEnemy(wave);
-          const interval = Math.max(
-            CONFIG.spawn.minimumInterval,
-            CONFIG.spawn.initialInterval - (wave - 1) * CONFIG.spawn.intervalDecreasePerWave
-          );
-          this.spawnTimer = interval * (0.86 + Math.random() * 0.28);
-        }
+      // Boss 战期间也维持正常刷怪节奏；Boss 与普通敌人共享场上数量上限。
+      this.spawnTimer -= dt;
+      if (this.spawnTimer <= 0 && this.enemies.length < CONFIG.spawn.maxEnemies) {
+        this.spawnEnemy(wave);
+        const interval = Math.max(
+          CONFIG.spawn.minimumInterval,
+          CONFIG.spawn.initialInterval - (wave - 1) * CONFIG.spawn.intervalDecreasePerWave
+        );
+        this.spawnTimer = interval * (0.86 + Math.random() * 0.28);
       }
 
       const p = this.player;
@@ -644,7 +645,7 @@
 
     queueBossForLevel(level) {
       if (!Number.isFinite(level) || level < CONFIG.boss.firstLevel || level % CONFIG.boss.levelInterval !== 0) return;
-      if (this.bossQueue.includes(level) || (this.boss && this.boss.bossLevel === level)) return;
+      if (this.bossQueue.includes(level) || this.enemies.some(enemy => enemy.isBoss && !enemy.dead && enemy.bossLevel === level)) return;
       this.bossQueue.push(level);
       this.bossQueue.sort((a, b) => a - b);
       if (!this.bossActive) this.startNextBoss();
@@ -655,7 +656,7 @@
       const level = this.bossQueue.shift();
       const entities = global.FantasySurvivor.Entities;
 
-      // Boss 入场时清空所有普通小怪及旧战斗投射物，战斗期间暂停普通刷怪。
+      // Boss 入场清理普通敌人与旧投射物；战斗期间仍按常规间隔刷新小怪。
       this.enemies.forEach(enemy => entities.release("enemy", enemy));
       this.enemies.length = 0;
       this.projectiles.forEach(shot => entities.release("projectile", shot));
@@ -668,27 +669,51 @@
       const hp = Math.round((CONFIG.boss.baseHp + encounterIndex * CONFIG.boss.hpIncreasePerEncounter) * waveScale);
       const visibleWidth = this.viewWidth / this.cameraZoom;
       const visibleHeight = this.viewHeight / this.cameraZoom;
-      const x = Math.max(CONFIG.boss.radius + 12, Math.min(this.arenaWidth - CONFIG.boss.radius - 12, this.player.x + (Math.random() - 0.5) * visibleWidth * 0.38));
-      const y = Math.max(CONFIG.boss.radius + 18, Math.min(this.arenaHeight - CONFIG.boss.radius - 18, this.player.y - visibleHeight * 0.28));
-      const boss = entities.acquire("enemy", {
-        id: this.nextEnemyId++, isBoss: true, bossLevel: level,
-        x, y, hp, maxHp: hp, speed: CONFIG.boss.speed + level * 0.65,
-        damage: CONFIG.boss.contactDamage, radius: CONFIG.boss.radius,
-        kind: "boss", color: "#8D58D8", flash: 0, contactCooldown: 0,
-        dead: false, bossMode: "idle", bossModeTimer: 0,
-        bossAttackTimer: CONFIG.boss.attackInterval, bossNextAttack: 0,
-        chargeDirX: 0, chargeDirY: 0, chargeRemaining: 0,
-        chargeHit: false, barrierCooldown: 0
-      });
-      this.enemies.push(boss);
-      this.boss = boss;
+      const baseX = Math.max(CONFIG.boss.radius + 12, Math.min(this.arenaWidth - CONFIG.boss.radius - 12, this.player.x + (Math.random() - 0.5) * visibleWidth * 0.38));
+      const baseY = Math.max(CONFIG.boss.radius + 18, Math.min(this.arenaHeight - CONFIG.boss.radius - 18, this.player.y - visibleHeight * 0.28));
+      // Lv.10/20/30 各出现 1 只；Lv.40 起每次守关增加 1 只。
+      const bossCount = level <= 30 ? 1 : 1 + Math.floor((level - 30) / CONFIG.boss.levelInterval);
+      for (let index = 0; index < bossCount; index += 1) {
+        const angle = Math.PI * 2 * index / bossCount + (bossCount > 1 ? Math.PI / 6 : 0);
+        const offset = index === 0 ? 0 : 230;
+        const x = Math.max(CONFIG.boss.radius + 12, Math.min(this.arenaWidth - CONFIG.boss.radius - 12, baseX + Math.cos(angle) * offset));
+        const y = Math.max(CONFIG.boss.radius + 18, Math.min(this.arenaHeight - CONFIG.boss.radius - 18, baseY + Math.sin(angle) * offset));
+        const boss = entities.acquire("enemy", {
+          id: this.nextEnemyId++, isBoss: true, bossLevel: level, bossIndex: index,
+          x, y, hp, maxHp: hp, speed: (CONFIG.boss.speed + level * 0.65) * 1.5,
+          damage: CONFIG.boss.contactDamage, radius: CONFIG.boss.radius,
+          kind: "boss", color: "#8D58D8", flash: 0, contactCooldown: 0,
+          dead: false, bossMode: "idle", bossModeTimer: 0,
+          bossAttackTimer: CONFIG.boss.attackInterval + index * 0.35, bossNextAttack: 0,
+          summonUses: 0, chargeBurstRemaining: 0,
+          chargeDirX: 0, chargeDirY: 0, chargeRemaining: 0,
+          chargeHit: false, barrierCooldown: 0
+        });
+        this.enemies.push(boss);
+        if (index === 0) this.boss = boss;
+        this.spawnBurst(boss.x, boss.y, "#C9A2FF", 42, 190);
+      }
       this.bossActive = true;
-      this.spawnTimer = 999999;
-      this.bossAnnouncement = `BOSS 来袭 · Lv.${level}`;
+      this.spawnTimer = Math.min(this.spawnTimer, 0.2);
+      this.bossAnnouncement = bossCount > 1 ? `BOSS 来袭 · Lv.${level} ×${bossCount}` : `BOSS 来袭 · Lv.${level}`;
       this.bossAnnouncementTimer = 2.4;
-      this.spawnBurst(boss.x, boss.y, "#C9A2FF", 42, 190);
       playSfx("bossAppear");
       this.updateHUD(true);
+    },
+
+    beginBossCharge(boss, chained) {
+      const p = this.player;
+      if (!p || !boss) return;
+      const aimX = p.x - boss.x;
+      const aimY = p.y - boss.y;
+      const aimLength = Math.hypot(aimX, aimY) || 1;
+      boss.chargeDirX = aimX / aimLength;
+      boss.chargeDirY = aimY / aimLength;
+      boss.bossMode = "chargeTell";
+      boss.bossModeTimer = CONFIG.boss.chargeTell;
+      playSfx("bossCharge");
+      this.bossAnnouncement = chained ? "警告：Boss 连续冲撞" : "警告：Boss 即将冲撞";
+      this.bossAnnouncementTimer = CONFIG.boss.chargeTell;
     },
 
     updateBossEnemy(boss, dt) {
@@ -699,14 +724,14 @@
         boss.bossModeTimer -= dt;
         if (boss.bossModeTimer <= 0) {
           boss.bossMode = "charge";
-          boss.chargeRemaining = Math.max(CONFIG.boss.chargeDistance, Math.hypot(this.viewWidth, this.viewHeight) / this.cameraZoom * 1.2);
+          boss.chargeRemaining = Math.max(CONFIG.boss.chargeDistance, Math.hypot(this.viewWidth, this.viewHeight) / this.cameraZoom * 0.3);
           boss.chargeHit = false;
         }
         return;
       }
 
       if (boss.bossMode === "charge") {
-        const step = Math.min(boss.chargeRemaining, CONFIG.boss.chargeSpeed * dt);
+        const step = Math.min(boss.chargeRemaining, CONFIG.boss.chargeSpeed * 1.5 * dt);
         const oldX = boss.x;
         const oldY = boss.y;
         boss.x += boss.chargeDirX * step;
@@ -720,10 +745,15 @@
           }
         }
         if (boss.chargeRemaining <= 0 || boss.x < -boss.radius || boss.y < -boss.radius || boss.x > this.arenaWidth + boss.radius || boss.y > this.arenaHeight + boss.radius) {
-          boss.bossMode = "idle";
-          boss.bossAttackTimer = 1.05;
           boss.x = Math.max(boss.radius, Math.min(this.arenaWidth - boss.radius, boss.x));
           boss.y = Math.max(boss.radius, Math.min(this.arenaHeight - boss.radius, boss.y));
+          if (boss.chargeBurstRemaining > 0) {
+            boss.chargeBurstRemaining -= 1;
+            this.beginBossCharge(boss, true);
+          } else {
+            boss.bossMode = "idle";
+            boss.bossAttackTimer = 1.05;
+          }
         }
         return;
       }
@@ -745,19 +775,12 @@
 
       boss.bossAttackTimer -= dt;
       if (boss.bossAttackTimer > 0) return;
-      const pattern = boss.bossNextAttack % 3;
+      const summonStillAvailable = (boss.summonUses || 0) < 3;
+      const pattern = boss.bossNextAttack % (summonStillAvailable ? 3 : 2);
       boss.bossNextAttack += 1;
       if (pattern === 0) {
-        const aimX = p.x - boss.x;
-        const aimY = p.y - boss.y;
-        const aimLength = Math.hypot(aimX, aimY) || 1;
-        boss.chargeDirX = aimX / aimLength;
-        boss.chargeDirY = aimY / aimLength;
-        playSfx("bossCharge");
-        boss.bossMode = "chargeTell";
-        boss.bossModeTimer = CONFIG.boss.chargeTell;
-        this.bossAnnouncement = "警告：Boss 即将冲撞";
-        this.bossAnnouncementTimer = CONFIG.boss.chargeTell;
+        boss.chargeBurstRemaining = (boss.summonUses || 0) >= 3 ? 2 : 0;
+        this.beginBossCharge(boss, false);
       } else if (pattern === 1) {
         this.spawnBossBarrier();
         boss.bossAttackTimer = CONFIG.boss.barrierTell + CONFIG.boss.barrierDuration + 0.6;
@@ -813,12 +836,13 @@
 
     spawnBossMinions(boss) {
       const entities = global.FantasySurvivor.Entities;
+      boss.summonUses = (boss.summonUses || 0) + 1;
       const waveScale = 1 + (this.getWave() - 1) * 0.12;
       for (let i = 0; i < CONFIG.boss.summonCount; i += 1) {
         const angle = Math.PI * 2 * i / CONFIG.boss.summonCount + this.elapsed;
         const x = Math.max(22, Math.min(this.arenaWidth - 22, boss.x + Math.cos(angle) * 78));
         const y = Math.max(22, Math.min(this.arenaHeight - 22, boss.y + Math.sin(angle) * 78));
-        const baseSpeed = CONFIG.enemy.eliteSpeed + (this.getWave() - 1) * 1.5;
+        const baseSpeed = (CONFIG.enemy.eliteSpeed + (this.getWave() - 1) * 1.5) * 1.5;
         const hp = Math.round(CONFIG.enemy.eliteHp * waveScale * 0.8);
         this.enemies.push(entities.acquire("enemy", {
           id: this.nextEnemyId++, isBossMinion: true,
@@ -828,8 +852,10 @@
           contactCooldown: 0, flash: 0, dead: false
         }));
       }
-      this.bossAnnouncement = "Boss 召唤了 3 只紫色精英";
-      this.bossAnnouncementTimer = 1.9;
+      this.bossAnnouncement = boss.summonUses >= 3
+        ? "Boss 最后一次召唤精英：后续将连续冲撞三次"
+        : `Boss 召唤了 3 只紫色精英（${boss.summonUses}/3）`;
+      this.bossAnnouncementTimer = 2.2;
       this.spawnBurst(boss.x, boss.y, "#B66CFF", 26, 145);
       playSfx("bossSummon");
     },
@@ -842,21 +868,40 @@
       playSfx("bossDefeat");
       this.spawnDrop(boss.x, boss.y, "exp", Math.max(35, Math.floor(boss.bossLevel * 5)));
       this.awardGold(35 + boss.bossLevel);
-      // Boss 召唤的小怪随 Boss 一同退场，普通刷怪随后恢复。
+      this.spawnChest(boss.x, boss.y);
+
+      const remainingBosses = this.enemies.filter(enemy => enemy.isBoss && !enemy.dead);
+      this.boss = remainingBosses[0] || null;
+      this.bossActive = remainingBosses.length > 0;
+      if (this.bossActive) {
+        this.bossAnnouncement = `Boss 已击败 · 仍有 ${remainingBosses.length} 只`;
+        this.bossAnnouncementTimer = 1.8;
+        this.updateHUD(true);
+        return;
+      }
+
+      // 只有同一波次的最后一只 Boss 倒下时，才清除它们召唤的精英。
       for (const enemy of this.enemies) {
-        if (enemy !== boss && enemy.isBossMinion && !enemy.dead) {
+        if (enemy.isBossMinion && !enemy.dead) {
           enemy.dead = true;
           this.runKills += 1;
         }
       }
-      this.boss = null;
-      this.bossActive = false;
       this.bossBarriers.length = 0;
-      this.bossAnnouncement = "Boss 已击败！继续冒险";
+      this.bossAnnouncement = "Boss 已全部击败！宝箱已掉落";
       this.bossAnnouncementTimer = 2.4;
       this.spawnTimer = 1.0;
       this.updateHUD(true);
       if (this.bossQueue.length) this.startNextBoss();
+    },
+
+    spawnChest(x, y) {
+      const entities = global.FantasySurvivor.Entities;
+      this.drops.push(entities.acquire("drop", {
+        x, y, vx: 0, vy: 0,
+        kind: "chest", value: 0, radius: 17,
+        life: Number.POSITIVE_INFINITY, color: "#F3C96B", dead: false
+      }));
     },
 
     cheatClearScreen() {
@@ -902,20 +947,20 @@
       const hpScale = 1 + (wave - 1) * 0.13;
       const damageScale = 1 + (wave - 1) * 0.07;
       let hp = CONFIG.enemy.normalHp * hpScale;
-      let speed = CONFIG.enemy.normalSpeed + (wave - 1) * 2.2;
+      let speed = (CONFIG.enemy.normalSpeed + (wave - 1) * 2.2) * 1.5;
       let damage = CONFIG.enemy.normalDamage * damageScale;
       let radius = CONFIG.enemy.contactRadius;
       let color = "#D98E91";
 
       if (kind === "fast") {
         hp = CONFIG.enemy.fastHp * hpScale;
-        speed = CONFIG.enemy.fastSpeed + (wave - 1) * 2.5;
+        speed = (CONFIG.enemy.fastSpeed + (wave - 1) * 2.5) * 1.5;
         damage = CONFIG.enemy.fastDamage * damageScale;
         radius = 10;
         color = "#E7B978";
       } else if (kind === "elite") {
         hp = CONFIG.enemy.eliteHp * hpScale;
-        speed = CONFIG.enemy.eliteSpeed + (wave - 1) * 1.5;
+        speed = (CONFIG.enemy.eliteSpeed + (wave - 1) * 1.5) * 1.5;
         damage = CONFIG.enemy.eliteDamage * damageScale;
         radius = 18;
         color = "#B388FF";
@@ -1104,7 +1149,7 @@
       }
 
       this.spawnBurst(p.x, p.y, THEME_COLOR, 2 + count, 14);
-      playSfx("shoot");
+      playSfx("playerAttack");
       p.attackTimer = p.attackInterval;
 
       // 每轮主角射击计数一次，与本轮子弹数量无关。
@@ -1178,7 +1223,7 @@
           damage: p.petDamage, hitEnemies: []
         };
         this.spawnBurst(petX, petY, "#B99AFF", 4, 35);
-        playSfx("petCharge");
+        playSfx("summonAttack");
       }
     },
 
@@ -1258,7 +1303,8 @@
         const dx = enemy.x - p.x;
         const dy = enemy.y - p.y;
         if (dx * dx + dy * dy <= radiusSq) {
-          this.damageEnemy(enemy, p.fortuneDamage * dt, false);
+          const targetMaxHp = Math.max(1, Number(enemy.maxHp) || Number(enemy.hp) || 1);
+          this.damageEnemy(enemy, targetMaxHp * p.fortuneDamage * dt, false);
         }
       }
     },
@@ -1422,6 +1468,16 @@
 
       for (let i = this.drops.length - 1; i >= 0; i -= 1) {
         const drop = this.drops[i];
+        if (drop.kind === "chest") {
+          const chestDistance = Math.hypot(p.x - drop.x, p.y - drop.y);
+          if (chestDistance <= p.radius + drop.radius + 28) {
+            entities.release("drop", this.drops.splice(i, 1)[0]);
+            this.pause();
+            if (typeof this.callbacks.onChestPickup === "function") this.callbacks.onChestPickup();
+            return;
+          }
+          continue;
+        }
         drop.life -= dt;
         if (drop.life <= 0) {
           entities.release("drop", this.drops.splice(i, 1)[0]);
@@ -1473,11 +1529,11 @@
       }
     },
 
-    applyUpgrade(card) {
+    applyUpgrade(card, consumeLevel = true) {
       if (!this.player || !card || typeof card.apply !== "function") return false;
       card.apply(this.player);
       this.player.buffCount = (this.player.buffCount || 0) + 1;
-      this.pendingLevelUps = Math.max(0, this.pendingLevelUps - 1);
+      if (consumeLevel) this.pendingLevelUps = Math.max(0, this.pendingLevelUps - 1);
       this.updateHUD(true);
       return true;
     },
@@ -1491,7 +1547,8 @@
     },
 
     expToNextLevel(level) {
-      return Math.round(20 + 10 * Math.pow(Math.max(0, level - 1), 1.25));
+      const currentLevel = Math.max(1, Math.floor(Number(level) || 1));
+      return Math.min(325, Math.round(20 + 10 * Math.pow(currentLevel - 1, 1.25)));
     },
 
     damagePlayer(amount) {
@@ -1503,7 +1560,10 @@
       p.hp = Math.max(0, Math.floor(p.hp) - 1);
       p.invuln = CONFIG.player.invulnerability;
       p.hitFlash = 0.18;
-      if (p.fortuneUnlocked) p.fortuneAuraTimer = p.fortuneAuraDuration;
+      if (p.fortuneUnlocked) {
+        p.fortuneAuraTimer = p.fortuneAuraDuration;
+        playSfx("fortuneActivate");
+      }
       if (this.screenShakeEnabled) {
         this.shakeTime = 0.16;
         this.shakeStrength = 4;
@@ -1590,6 +1650,8 @@
       if (this.gameOverHandled || !this.player) return;
       this.gameOverHandled = true;
       playSfx("gameOver");
+      const audio = global.FantasySurvivor && global.FantasySurvivor.Audio;
+      if (audio) audio.setScene("silent");
       this.active = false;
       this.paused = false;
       this.keys.clear();
@@ -1756,6 +1818,23 @@
         const pulse = 1 + Math.sin(time * 5 + drop.x * 0.02) * 0.12;
         ctx.save();
         ctx.translate(drop.x, drop.y);
+        if (drop.kind === "chest") {
+          ctx.globalAlpha = 0.96;
+          ctx.shadowColor = "#F4CD73";
+          ctx.shadowBlur = 20 + Math.sin(time * 5) * 5;
+          ctx.fillStyle = "#9B6427";
+          ctx.strokeStyle = "#FFE3A0";
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.roundRect ? ctx.roundRect(-15, -8, 30, 22, 4) : ctx.rect(-15, -8, 30, 22); ctx.fill(); ctx.stroke();
+          ctx.fillStyle = "#DFAE4E";
+          ctx.fillRect(-16, -11, 32, 7);
+          ctx.strokeRect(-16, -11, 32, 7);
+          ctx.fillStyle = "#FFF1C1";
+          ctx.fillRect(-2, -7, 4, 13);
+          ctx.beginPath(); ctx.arc(0, 0, 2.2, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
+          return;
+        }
         ctx.rotate(time * 0.8);
         ctx.globalAlpha = Math.min(1, drop.life / 1.2);
         ctx.fillStyle = drop.color;
@@ -1847,9 +1926,8 @@
     },
 
     drawBossHazards(ctx, time) {
-      if (this.boss && this.boss.bossMode === "chargeTell") {
-        const boss = this.boss;
-        const length = Math.max(CONFIG.boss.chargeDistance, Math.hypot(this.viewWidth, this.viewHeight) / this.cameraZoom * 0.72);
+      this.enemies.filter(enemy => enemy.isBoss && !enemy.dead && enemy.bossMode === "chargeTell").forEach(boss => {
+        const length = Math.max(CONFIG.boss.chargeDistance, Math.hypot(this.viewWidth, this.viewHeight) / this.cameraZoom * 0.18);
         ctx.save();
         ctx.globalAlpha = 0.35 + Math.sin(time * 18) * 0.16;
         ctx.strokeStyle = "#FF7B9C";
@@ -1861,7 +1939,7 @@
         ctx.lineTo(boss.x + boss.chargeDirX * length, boss.y + boss.chargeDirY * length);
         ctx.stroke();
         ctx.restore();
-      }
+      });
 
       if (!this.bossBarriers.length) return;
       ctx.save();

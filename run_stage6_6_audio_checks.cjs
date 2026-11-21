@@ -45,13 +45,13 @@ for (const file of ['js/save.js', 'js/audio.js']) {
 }
 const app = fakeWindow.FantasySurvivor;
 
-// 1. Existing V4 saves migrate to V5 without losing their volume or joystick position.
+// 1. Existing V4 saves migrate to V7 without losing their volume or joystick position.
 const migrated = app.Save.normalize({
   version: 4, gold: 1234,
   settings: { masterVolume: 42, joystickPosition: { x: 0.55, y: 0.63 } }
 });
-if (migrated.version !== 5 || migrated.gold !== 1234) throw new Error('V4 save migration lost data or failed to bump version');
-if (migrated.settings.masterVolume !== 42 || migrated.settings.bgmVolume !== 70 || migrated.settings.sfxVolume !== 80 || migrated.settings.audioEnabled !== true) {
+if (migrated.version !== 7 || migrated.gold !== 1234) throw new Error('V4 save migration lost data or failed to bump version');
+if (migrated.settings.masterVolume !== 42 || migrated.settings.bgmVolume !== 35 || migrated.settings.sfxVolume !== 80 || migrated.settings.audioEnabled !== true) {
   throw new Error('V4 audio settings migration defaults incorrect');
 }
 if (migrated.settings.joystickPosition.x !== 0.55) throw new Error('V4 joystick setting was not preserved');
@@ -75,7 +75,7 @@ if (bgmElement.paused) throw new Error('unmuting after unlock did not resume sha
 
 // 4. Procedural sound effects use Web Audio oscillators; they need no external SFX assets.
 audio.setSfxVolume(0.8);
-const supportedSfx = ['ui','runStart','shoot','enemyHit','enemyDefeat','petCharge','vortexSpawn','coin','expPickup','levelUp','upgrade','playerHit','bossAppear','bossCharge','bossBarrier','bossSummon','bossDefeat','gameOver'];
+const supportedSfx = ['ui','runStart','shoot','playerAttack','enemyHit','enemyDefeat','petCharge','summonSpawn','summonAttack','vortexSpawn','fortuneActivate','coin','expPickup','levelUp','upgrade','upgradeConfirm','playerHit','bossAppear','bossCharge','bossBarrier','bossSummon','bossDefeat','gameOver'];
 for (const name of supportedSfx) {
   if (!audio.playSfx(name)) throw new Error(`procedural SFX did not play: ${name}`);
 }
@@ -92,8 +92,8 @@ for (const id of requiredIds) {
   if (!html.includes(`id="${id}"`) || !ui.includes(`"${id}"`)) throw new Error(`audio setting control missing: ${id}`);
 }
 if (!ui.includes('Audio.unlock()') || !ui.includes('setBgmVolume') || !ui.includes('setSfxVolume') || !ui.includes('setEnabled')) throw new Error('UI audio wiring incomplete');
-if (!game.includes('playSfx("shoot")') || !game.includes('playSfx("playerHit")') || !game.includes('playSfx("bossAppear")') || !game.includes('playSfx("bossDefeat")')) throw new Error('gameplay SFX hooks missing');
-if (!save.includes('const VERSION = 5') || !save.includes('bgmVolume: clamp') || !save.includes('audioEnabled: s.audioEnabled !== false')) throw new Error('audio settings schema V5 incomplete');
+if (!game.includes('playSfx("playerAttack")') || !game.includes('playSfx("playerHit")') || !game.includes('playSfx("bossAppear")') || !game.includes('playSfx("bossDefeat")')) throw new Error('gameplay SFX hooks missing');
+if (!save.includes('const VERSION = 7') || !save.includes('bgmVolume: clamp') || !save.includes('audioEnabled: s.audioEnabled !== false')) throw new Error('audio settings schema V7 incomplete');
 if (!fs.existsSync(path.join(root, 'assets/audio/README.md'))) throw new Error('BGM asset placement instructions missing');
 if (fs.existsSync(path.join(root, 'assets/audio/bgm1.mp3'))) throw new Error('unexpected bundled MP3: supplied local file was not part of current chat upload');
-console.log('STAGE6.6 AUDIO TESTS PASSED: V4->V5 migration preserves old save, looped shared BGM path, autoplay unlock flow, volume mixing/mute, procedural WebAudio SFX, audio settings controls and gameplay hooks verified. NOTE: place the user-supplied bgm1.mp3 at assets/audio/bgm1.mp3 before deployment.');
+console.log('STAGE6.9 AUDIO REGRESSION TESTS PASSED: V4->V7 migration preserves old save, looped shared BGM path, autoplay unlock flow, volume mixing/mute, procedural WebAudio SFX, audio settings controls attack, selection-confirm, summon, vortex and Fortune ability sounds and gameplay hooks verified. NOTE: place the user-supplied bgm1.mp3 at assets/audio/bgm1.mp3 before deployment.');

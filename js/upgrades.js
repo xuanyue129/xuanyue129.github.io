@@ -4,7 +4,7 @@
 
   const CONFIG = Object.freeze({
     shop: {
-      maxHp: { label: "初始生命上限", description: "每级开局额外 +1 颗心", baseCost: 45, growth: 1.48, maxLevel: 10, unit: "+1 ♥" },
+      offlineRate: { label: "离线收益倍率", description: "每级离线金币收益提高 10%", baseCost: 45, growth: 1.48, maxLevel: 20, unit: "+10%" },
       damage: { label: "初始伤害", description: "每级开局伤害 +1.5", baseCost: 45, growth: 1.46, maxLevel: 30, unit: "+1.5" },
       goldRate: { label: "金币获取率", description: "每级金币收益 +8%", baseCost: 55, growth: 1.52, maxLevel: 20, unit: "+8%" },
       expRate: { label: "经验获取率", description: "每级经验收益 +7%", baseCost: 55, growth: 1.52, maxLevel: 20, unit: "+7%" }
@@ -18,7 +18,7 @@
     },
     archetypes: {
       shooting: { label: "射击流派", className: "shooting", color: "#70C8E8" },
-      pet: { label: "宠物流派", className: "pet", color: "#B99AFF" },
+      pet: { label: "召唤物流派", className: "pet", color: "#B99AFF" },
       gather: { label: "聚怪流派", className: "gather", color: "#83D7C5" },
       fortune: { label: "大运流派", className: "fortune", color: "#F0C56A" },
       general: { label: "通用词条", className: "general", color: "#D7DFEA" }
@@ -37,14 +37,14 @@
     { id: "projectileSpeed", archetype: "shooting", name: "流光弹芯", desc: "子弹飞行速度提高 20%", rarity: "common", icon: "➶", apply: p => { p.projectileSpeed *= 1.2; } },
     { id: "attackRange", archetype: "shooting", name: "远星锁定", desc: "自动索敌范围提高 18%", rarity: "rare", icon: "◎", apply: p => { p.attackRange *= 1.18; } },
 
-    // 宠物流派：首次必须召唤，随后宠物沿直线冲撞，路径上的所有敌人均会受伤。
-    { id: "petSummon", archetype: "pet", name: "灵伴初现", desc: "召唤 1 只环绕自身的冲撞宠物", rarity: "rare", icon: "✧", available: p => (p.petCount || 0) <= 0, apply: p => { p.petCount = 1; p.petAttackTimers = [0.25]; p.petCharges = [null]; } },
-    { id: "petCount", archetype: "pet", name: "灵伴增援", desc: "额外召唤 1 只宠物（最多 6 只）", rarity: "epic", icon: "✦", available: p => (p.petCount || 0) > 0 && p.petCount < 6, apply: p => { p.petCount += 1; p.petAttackTimers = p.petAttackTimers || []; p.petAttackTimers.push(0.35); p.petCharges = p.petCharges || []; p.petCharges.push(null); } },
-    { id: "petDamage", archetype: "pet", name: "灵核淬炼", desc: "宠物每次冲撞伤害提高 25%", rarity: "common", icon: "◆", available: p => (p.petCount || 0) > 0, apply: p => { p.petDamage *= 1.25; } },
-    { id: "petChargeDistance", archetype: "pet", name: "长驱直入", desc: "宠物冲撞距离提高 22%", rarity: "common", icon: "➶", available: p => (p.petCount || 0) > 0 && p.petChargeDistance < 470, apply: p => { p.petChargeDistance = Math.min(480, p.petChargeDistance * 1.22); } },
-    { id: "petChargeWidth", archetype: "pet", name: "横扫千军", desc: "宠物冲撞范围（宽度）提高 22%", rarity: "rare", icon: "↔", available: p => (p.petCount || 0) > 0 && p.petChargeWidth < 82, apply: p => { p.petChargeWidth = Math.min(88, p.petChargeWidth * 1.22); } },
-    { id: "petChargeInterval", archetype: "pet", name: "迅捷回身", desc: "宠物冲撞间隔缩短 12%", rarity: "rare", icon: "↻", available: p => (p.petCount || 0) > 0 && p.petChargeInterval > 0.42, apply: p => { p.petChargeInterval = Math.max(0.4, p.petChargeInterval * 0.88); } },
-    { id: "petChargeSpeed", archetype: "pet", name: "疾风冲阵", desc: "宠物冲撞速度提高 18%", rarity: "epic", icon: "➤", available: p => (p.petCount || 0) > 0 && p.petChargeSpeed < 1450, apply: p => { p.petChargeSpeed = Math.min(1500, p.petChargeSpeed * 1.18); } },
+    // 召唤物流派：首次必须召唤，随后召唤物沿直线冲撞，路径上的所有敌人均会受伤。
+    { id: "petSummon", archetype: "pet", name: "灵伴初现", desc: "召唤 1 只环绕自身、能够冲撞攻击的召唤物", rarity: "rare", icon: "✧", available: p => (p.petCount || 0) <= 0, apply: p => { p.petCount = 1; p.petAttackTimers = [0.25]; p.petCharges = [null]; } },
+    { id: "petCount", archetype: "pet", name: "灵伴增援", desc: "额外召唤 1 只召唤物（最多 6 只）", rarity: "epic", icon: "✦", available: p => (p.petCount || 0) > 0 && p.petCount < 6, apply: p => { p.petCount += 1; p.petAttackTimers = p.petAttackTimers || []; p.petAttackTimers.push(0.35); p.petCharges = p.petCharges || []; p.petCharges.push(null); } },
+    { id: "petDamage", archetype: "pet", name: "灵核淬炼", desc: "召唤物每次冲撞伤害提高 25%", rarity: "common", icon: "◆", available: p => (p.petCount || 0) > 0, apply: p => { p.petDamage *= 1.25; } },
+    { id: "petChargeDistance", archetype: "pet", name: "长驱直入", desc: "召唤物冲撞距离提高 22%", rarity: "common", icon: "➶", available: p => (p.petCount || 0) > 0 && p.petChargeDistance < 470, apply: p => { p.petChargeDistance = Math.min(480, p.petChargeDistance * 1.22); } },
+    { id: "petChargeWidth", archetype: "pet", name: "横扫千军", desc: "召唤物冲撞范围（宽度）提高 22%", rarity: "rare", icon: "↔", available: p => (p.petCount || 0) > 0 && p.petChargeWidth < 82, apply: p => { p.petChargeWidth = Math.min(88, p.petChargeWidth * 1.22); } },
+    { id: "petChargeInterval", archetype: "pet", name: "迅捷回身", desc: "召唤物冲撞间隔缩短 12%", rarity: "rare", icon: "↻", available: p => (p.petCount || 0) > 0 && p.petChargeInterval > 0.42, apply: p => { p.petChargeInterval = Math.max(0.4, p.petChargeInterval * 0.88); } },
+    { id: "petChargeSpeed", archetype: "pet", name: "疾风冲阵", desc: "召唤物冲撞速度提高 18%", rarity: "epic", icon: "➤", available: p => (p.petCount || 0) > 0 && p.petChargeSpeed < 1450, apply: p => { p.petChargeSpeed = Math.min(1500, p.petChargeSpeed * 1.18); } },
 
     // 聚怪流派
     { id: "vortexUnlock", archetype: "gather", name: "风眼初现", desc: "解锁风漩涡：每射击 8 次召唤一个牵引敌人并持续造成伤害的漩涡", rarity: "rare", icon: "🌀", available: p => !p.vortexUnlocked, apply: p => { p.vortexUnlocked = true; p.vortexShotCounter = 0; } },
@@ -57,7 +57,7 @@
 
     // 大运流派：受伤后短时间开启伤害光环；回血词条仅保留用户明确要求的三种。
     { id: "fortuneUnlock", archetype: "fortune", name: "大运临身", desc: "解锁气运反噬：每次受伤后，周围敌人会持续受到伤害", rarity: "rare", icon: "☯", available: p => !p.fortuneUnlocked, apply: p => { p.fortuneUnlocked = true; p.fortuneAuraTimer = 0; } },
-    { id: "fortuneDamage", archetype: "fortune", name: "否极泰来", desc: "气运反噬持续伤害提高 35%", rarity: "common", icon: "✹", available: p => p.fortuneUnlocked, apply: p => { p.fortuneDamage *= 1.35; } },
+    { id: "fortuneDamage", archetype: "fortune", name: "否极泰来", desc: "气运反噬每秒造成目标最大生命值 12% 的伤害，强化后再提高 35%", rarity: "common", icon: "✹", available: p => p.fortuneUnlocked, apply: p => { p.fortuneDamage *= 1.35; } },
     { id: "fortuneRadius", archetype: "fortune", name: "运势扩张", desc: "气运反噬伤害范围提高 22%", rarity: "rare", icon: "◎", available: p => p.fortuneUnlocked && p.fortuneRadius < 210, apply: p => { p.fortuneRadius = Math.min(220, p.fortuneRadius * 1.22); } },
     { id: "fortuneDuration", archetype: "fortune", name: "时来运转", desc: "每次受伤触发的气运反噬持续时间增加 1.5 秒", rarity: "common", icon: "⌛", available: p => p.fortuneUnlocked && p.fortuneAuraDuration < 10, apply: p => { p.fortuneAuraDuration = Math.min(11, p.fortuneAuraDuration + 1.5); } },
     { id: "fortuneKillHeal", archetype: "fortune", name: "以战养运", desc: "解锁击杀回复：每击杀 20 只怪物恢复 1 颗心；再次选择可减少所需击杀数", rarity: "epic", icon: "♥", available: p => p.fortuneUnlocked && p.fortuneKillHealEvery > 4, apply: p => { p.fortuneKillHealEvery = p.fortuneKillHealEvery === Infinity ? 20 : Math.max(4, p.fortuneKillHealEvery - 4); } },

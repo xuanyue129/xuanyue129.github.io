@@ -6,11 +6,15 @@
     saveData: null,
     elements: {},
     toastTimer: 0,
+    modalCloseTimers: Object.create(null),
     lastResult: null,
     goldAnimatedTarget: null,
     goldDisplayedValue: 0,
     goldAnimationFrame: 0,
     settingsPausedRun: false,
+    triplePickRemaining: 0,
+    currentUpgradeLevel: 1,
+    currentUpgradeCount: 1,
     init(saveData) {
       this.saveData = saveData;
       const ids = [
@@ -19,7 +23,8 @@
         "particlesInput", "shakeInput", "hudHealth", "hudHearts",
         "hudLevel", "hudExpText", "expFill", "hudGold", "hudGoldGain", "hudWave", "hudKills", "hudTime", "hudBuffs",
         "resultTime", "resultKills", "resultLevel", "resultExperience", "resultGold", "resultTotalGold",
-        "upgradeModal", "upgradeCards", "shopModal", "shopCards", "shopGold", "prestigeModal",
+        "upgradeModal", "upgradeCards", "upgradeRefreshButton", "upgradeRefreshCount", "chestRewardModal",
+        "shopModal", "shopCards", "shopGold", "prestigeModal",
         "prestigeInfo", "offlineModal", "offlineInfo", "upgradeTitle", "upgradeSubtitle", "confirmPrestige",
         "joystickPreviewArea", "joystickPreviewControl"
       ];
@@ -30,6 +35,7 @@
       app.Game.setCallbacks({
         onHUD: data => this.updateHUD(data),
         onLevelUp: (level, count) => this.showUpgrade(level, count),
+        onChestPickup: () => this.showChestReward(),
         onGameOver: result => this.showSettlement(result),
         onPause: reason => {
           if (reason === "visibility") this.openModal("pauseModal");
@@ -50,10 +56,12 @@
       this.bindJoystickPreview();
       this.refreshSettings();
       this.refreshMenu();
+      app.Audio.setScene("menu");
+      app.Audio.preloadMusic();
 
       if (this.saveData.offlineReward && this.saveData.offlineReward.gold > 0) {
         const reward = this.saveData.offlineReward;
-        this.elements.offlineInfo.textContent = `离开期间 ${this.formatHours(reward.hours)}，依据最高波次 ${reward.wave} 获得 ${reward.gold} 金币（最多计算 8 小时）。`;
+        this.elements.offlineInfo.textContent = `离开期间 ${this.formatHours(reward.hours)}，依据最高波次 ${reward.wave} 获得 ${reward.gold} 金币（最多计算 8 小时）；离线收益倍率 ×${Number(reward.multiplier || 1).toFixed(2)}。`;
         this.openModal("offlineModal");
         this.saveData.offlineReward.gold = 0;
       }
@@ -83,13 +91,16 @@
         case "reset-save": this.resetSave(); break;
         case "reset-joystick-position": this.resetJoystickPosition(); break;
         case "upgrade-card": this.chooseUpgrade(Number(action.dataset.index)); break;
+        case "refresh-upgrade": this.refreshUpgradeCards(); break;
+        case "chest-reward": this.chooseChestReward(action.dataset.reward); break;
+        case "test-audio": audio.testSfx(); break;
         case "buy-upgrade": this.buyUpgrade(action.dataset.key); break;
       }
     },
 
     handleKeydown(event) {
       if (event.key !== "Escape") return;
-      if (!this.elements.upgradeModal.hidden) return;
+      if (!this.elements.upgradeModal.hidden || !this.elements.chestRewardModal.hidden) return;
       if (!this.elements.settingsModal.hidden) this.closeSettings();
       else if (!this.elements.pauseModal.hidden) this.resumeGame();
       else if (!this.elements.gameScreen.hidden) this.pauseGame();
@@ -98,13 +109,27 @@
     openModal(id) {
       const modal = this.elements[id];
       if (!modal) return;
+      if (this.modalCloseTimers[id]) { global.clearTimeout(this.modalCloseTimers[id]); delete this.modalCloseTimers[id]; }
       modal.hidden = false;
+      modal.classList.remove("ui-exit");
+      modal.classList.remove("ui-enter");
+      void modal.offsetWidth;
+      modal.classList.add("ui-enter");
       const focusable = modal.querySelector("button, input");
       if (focusable) focusable.focus({ preventScroll: true });
     },
 
     closeModal(id) {
-      if (this.elements[id]) this.elements[id].hidden = true;
+      const modal = this.elements[id];
+      if (!modal || modal.hidden) return;
+      if (this.modalCloseTimers[id]) global.clearTimeout(this.modalCloseTimers[id]);
+      modal.classList.remove("ui-enter");
+      modal.classList.add("ui-exit");
+      this.modalCloseTimers[id] = global.setTimeout(() => {
+        modal.hidden = true;
+        modal.classList.remove("ui-exit");
+        delete this.modalCloseTimers[id];
+      }, 160);
     },
 
     isMobileLayout() {
@@ -164,12 +189,17 @@
 
     startRun() {
       const app = global.FantasySurvivor;
-      ["pauseModal", "settlementModal", "upgradeModal"].forEach(id => this.closeModal(id));
+      this.triplePickRemaining = 0;
+      ["pauseModal", "settlementModal", "upgradeModal", "chestRewardModal"].forEach(id => this.closeModal(id));
       this.elements.menuScreen.hidden = true;
       this.elements.gameScreen.hidden = false;
+      this.elements.gameScreen.classList.remove("screen-enter");
+      void this.elements.gameScreen.offsetWidth;
+      this.elements.gameScreen.classList.add("screen-enter");
       this.enterMobileImmersiveMode();
       app.Game.setProgression(this.saveData, app.Upgrades.shardMultiplier(this.saveData));
       app.Game.start();
+      app.Audio.setScene("combat");
       app.Game.resize();
     },
 
@@ -184,15 +214,21 @@
     resumeGame() {
       this.closeModal("pauseModal");
       global.FantasySurvivor.Game.resume();
+      const game = global.FantasySurvivor.Game;
+      global.FantasySurvivor.Audio.setScene(game.bossActive ? "boss" : "combat");
     },
 
     returnToMenu() {
       const app = global.FantasySurvivor;
-      ["pauseModal", "settlementModal", "settingsModal", "upgradeModal"].forEach(id => this.closeModal(id));
+      ["pauseModal", "settlementModal", "settingsModal", "upgradeModal", "chestRewardModal"].forEach(id => this.closeModal(id));
       this.settingsPausedRun = false;
       app.Game.stop();
       this.elements.gameScreen.hidden = true;
       this.elements.menuScreen.hidden = false;
+      this.elements.menuScreen.classList.remove("screen-enter");
+      void this.elements.menuScreen.offsetWidth;
+      this.elements.menuScreen.classList.add("screen-enter");
+      app.Audio.setScene("menu");
       this.exitMobileImmersiveMode();
       this.refreshMenu();
     },
@@ -202,6 +238,8 @@
     },
 
     updateHUD(data) {
+      const audio = global.FantasySurvivor.Audio;
+      if (audio) audio.setScene(data.bossActive ? "boss" : (global.FantasySurvivor.Game.inRun ? "combat" : "menu"));
       const currentHearts = Math.max(0, Math.ceil(data.hp));
       const maximumHearts = Math.max(1, Math.ceil(data.maxHp));
       this.elements.hudHealth.textContent = `${currentHearts} / ${maximumHearts}`;
@@ -278,8 +316,16 @@
     },
 
     showUpgrade(level, count) {
+      this.currentUpgradeLevel = level;
+      this.currentUpgradeCount = count;
+      this.renderUpgradeDraft();
+      this.openModal("upgradeModal");
+    },
+
+    renderUpgradeDraft() {
       const app = global.FantasySurvivor;
-      const cards = app.Upgrades.rollCards(3, app.Game.player);
+      const game = app.Game;
+      const cards = app.Upgrades.rollCards(3, game.player);
       this.currentCards = cards;
       this.elements.upgradeCards.innerHTML = cards.map((card, index) => {
         const rarity = app.Upgrades.rarities[card.rarity];
@@ -292,22 +338,76 @@
           <small>${card.desc}</small>
         </button>`;
       }).join("");
-      this.elements.upgradeTitle.textContent = `等级提升 · Lv.${level}`;
-      this.elements.upgradeSubtitle.textContent = count > 1
-        ? `还有 ${count} 次强化待选择 · 四大流派与通用词条随机出现`
-        : "射击、宠物、聚怪、大运与通用词条混合随机出现，选择你的构筑方向";
-      this.openModal("upgradeModal");
+      this.elements.upgradeTitle.textContent = `等级提升 · Lv.${this.currentUpgradeLevel}`;
+      const tripleActive = this.triplePickRemaining > 0 || game.player.triplePickPending;
+      if (this.triplePickRemaining > 0) {
+        this.elements.upgradeSubtitle.textContent = `宝箱祝福生效 · 还可连续选择 ${this.triplePickRemaining} 次`;
+      } else if (game.player.triplePickPending) {
+        this.elements.upgradeSubtitle.textContent = "宝箱祝福待触发 · 本次选择将开启连续三次强化";
+      } else {
+        this.elements.upgradeSubtitle.textContent = this.currentUpgradeCount > 1
+          ? `还有 ${this.currentUpgradeCount} 次强化待选择 · 四大流派与通用词条随机出现`
+          : "射击、召唤物、聚怪、大运与通用词条混合随机出现，选择你的构筑方向";
+      }
+      const remaining = Math.max(0, Math.floor(game.player.upgradeRefreshes || 0));
+      this.elements.upgradeRefreshCount.textContent = String(remaining);
+      this.elements.upgradeRefreshButton.disabled = remaining <= 0;
+      this.elements.upgradeRefreshButton.setAttribute("aria-label", `刷新词条，剩余 ${remaining} 次`);
+    },
+
+    refreshUpgradeCards() {
+      const game = global.FantasySurvivor.Game;
+      if (!game.player || !this.currentCards || game.player.upgradeRefreshes <= 0) return;
+      game.player.upgradeRefreshes -= 1;
+      this.renderUpgradeDraft();
+      this.persist();
     },
 
     chooseUpgrade(index) {
       const card = this.currentCards && this.currentCards[index];
       if (!card) return;
       const game = global.FantasySurvivor.Game;
-      if (!game.applyUpgrade(card)) return;
-      global.FantasySurvivor.Audio.playSfx("upgrade");
+      if (game.player.triplePickPending && this.triplePickRemaining <= 0) {
+        game.player.triplePickPending = false;
+        this.triplePickRemaining = 3;
+      }
+      const tripleActive = this.triplePickRemaining > 0;
+      const consumeLevel = !tripleActive || this.triplePickRemaining === 1;
+      if (!game.applyUpgrade(card, consumeLevel)) return;
+      const audio = global.FantasySurvivor.Audio;
+      audio.playSfx("upgradeConfirm");
+      if (card.id === "petSummon") audio.playSfx("summonSpawn");
+      if (tripleActive) this.triplePickRemaining -= 1;
       this.persist();
+      if (this.triplePickRemaining > 0) {
+        this.renderUpgradeDraft();
+        return;
+      }
       this.closeModal("upgradeModal");
       game.continueAfterUpgrade();
+    },
+
+    showChestReward() {
+      this.openModal("chestRewardModal");
+    },
+
+    chooseChestReward(reward) {
+      const game = global.FantasySurvivor.Game;
+      const player = game.player;
+      if (!player) return;
+      if (reward === "heal") {
+        player.hp = Math.min(player.maxHp, player.hp + 2);
+      } else if (reward === "triple") {
+        player.triplePickPending = true;
+      } else if (reward === "refresh") {
+        player.upgradeRefreshes = Math.max(0, player.upgradeRefreshes || 0) + 3;
+      } else {
+        return;
+      }
+      game.updateHUD(true);
+      this.persist();
+      this.closeModal("chestRewardModal");
+      game.resume();
     },
 
     showSettlement(result) {
@@ -375,7 +475,7 @@
       const accepted = global.confirm("确认转生？金币和四项永久商店等级将清零，星辉碎片及其全局倍率永久保留。");
       if (!accepted) return;
       this.saveData.gold = 0;
-      this.saveData.permanentUpgrades = { maxHp: 0, damage: 0, goldRate: 0, expRate: 0 };
+      this.saveData.permanentUpgrades = { offlineRate: 0, damage: 0, goldRate: 0, expRate: 0 };
       this.saveData.shards += global.FantasySurvivor.Upgrades.CONFIG.prestige.shardsPerPrestige;
       this.saveData.prestigeCount += 1;
       this.persist();
@@ -410,6 +510,8 @@
       if (this.settingsPausedRun) {
         this.settingsPausedRun = false;
         global.FantasySurvivor.Game.resume();
+      const game = global.FantasySurvivor.Game;
+      global.FantasySurvivor.Audio.setScene(game.bossActive ? "boss" : "combat");
       }
     },
 
