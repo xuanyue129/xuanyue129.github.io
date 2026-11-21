@@ -26,7 +26,8 @@
     resumePromise: null,
     pendingSfx: [],
     lastPlayed: new Map(),
-    missingBgmWarned: false
+    missingBgmWarned: false,
+    restartOnNextStart: false
   };
 
   const bgmUrl = "./assets/audio/bgm1.mp3";
@@ -148,14 +149,21 @@
   function startMusic() {
     state.musicRequested = true;
     if (!state.enabled || !state.unlocked || !musicSceneAllowed()) return Promise.resolve(false);
-    if (!bgm.paused && !bgm.ended) {
+    if (!state.restartOnNextStart && !bgm.paused && !bgm.ended) {
       syncMusicVolume();
       return Promise.resolve(true);
     }
+    // 首只 Boss 入场可要求从音乐开头重播；即使此时已有播放任务在等待预加载，
+    // 也会在真正调用 play() 前消费该标记，避免从旧进度接着播放。
+    if (state.restartOnNextStart && !bgm.paused) bgm.pause();
     if (state.startPromise) return state.startPromise;
     state.startPromise = preloadMusic().then(() => {
       // 下载期间场景/静音状态可能已改变；二次检查以免在普通战斗中迟到播放。
       if (!state.musicRequested || !state.enabled || !state.unlocked || !musicSceneAllowed()) return false;
+      if (state.restartOnNextStart) {
+        try { bgm.currentTime = 0; } catch (_) { /* 等待媒体元数据后仍从默认起点播放 */ }
+        state.restartOnNextStart = false;
+      }
       syncMusicVolume();
       return Promise.resolve(bgm.play()).then(() => true).catch(error => {
         if (!state.missingBgmWarned) {
@@ -179,6 +187,14 @@
     resumeContext();
     // 只有主界面、Boss 战及首个 Boss 解锁后的战斗场景才开始 BGM。
     if (state.scene === "menu" || state.scene === "boss" || state.scene === "postBoss") return startMusic();
+    return Promise.resolve(false);
+  }
+
+  function restartMusicFromBeginning() {
+    // 标记优先于实际播放：若尚处于普通战斗静音场景，稍后切入 Boss 场景时再从 0 秒启动。
+    state.restartOnNextStart = true;
+    if (!bgm.paused) bgm.pause();
+    if (state.enabled && state.unlocked && musicSceneAllowed()) return startMusic();
     return Promise.resolve(false);
   }
 
@@ -266,6 +282,7 @@
     startMusic,
     preloadMusic,
     setScene,
+    restartMusicFromBeginning,
     getScene() { return state.scene; },
     playSfx,
     playUi() { return playSfx("ui"); },

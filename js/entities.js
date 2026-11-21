@@ -7,7 +7,7 @@
     projectile: 260,
     enemyProjectile: 180,
     drop: 260,
-    particle: 900
+    particle: 420
   };
 
   const pools = {

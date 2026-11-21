@@ -56,8 +56,25 @@
       magnetSpeed: 230
     },
     particles: {
-      highLimit: 600,
-      lowLimit: 180
+      highLimit: 280,
+      lowLimit: 100
+    },
+    experience: {
+      minEnemyReward: 5,
+      maxEnemyReward: 10,
+      waveStep: 2,
+      fastBonus: 1,
+      eliteBonus: 2,
+      bossReward: 25,
+      maxPickupReward: 25
+    },
+    performance: {
+      desktopFps: 60,
+      mobileFps: 60,
+      backgroundFps: 60,
+      desktopDpr: 1.15,
+      mobileDpr: 1.0,
+      lowPowerDpr: 0.85
     },
     grid: {
       cellSize: 120
@@ -291,7 +308,13 @@
       const rect = canvas.getBoundingClientRect();
       const width = Math.max(1, rect.width || 1);
       const height = Math.max(1, rect.height || 1);
-      const dpr = Math.min(global.devicePixelRatio || 1, 2);
+      const coarse = global.matchMedia && global.matchMedia("(pointer: coarse), (max-width: 900px)").matches;
+      const nav = global.navigator || {};
+      const lowPower = (Number(nav.hardwareConcurrency) > 0 && Number(nav.hardwareConcurrency) <= 4) ||
+        (Number(nav.deviceMemory) > 0 && Number(nav.deviceMemory) <= 4);
+      const dprCap = lowPower ? CONFIG.performance.lowPowerDpr :
+        (coarse ? CONFIG.performance.mobileDpr : CONFIG.performance.desktopDpr);
+      const dpr = Math.max(0.75, Math.min(global.devicePixelRatio || 1, dprCap));
       canvas.width = Math.round(width * dpr);
       canvas.height = Math.round(height * dpr);
       context.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -335,7 +358,7 @@
     },
 
     makeStars() {
-      const count = Math.max(45, Math.min(145, Math.floor((this.width * this.height) / 10500)));
+      const count = Math.max(32, Math.min(92, Math.floor((this.width * this.height) / 16500)));
       this.stars = Array.from({ length: count }, () => ({
         x: Math.random() * this.width,
         y: Math.random() * this.height * 0.78,
@@ -343,7 +366,7 @@
         phase: Math.random() * Math.PI * 2,
         speed: 0.45 + Math.random() * 1.25
       }));
-      this.motes = Array.from({ length: Math.min(28, Math.floor(count / 3)) }, () => ({
+      this.motes = Array.from({ length: Math.min(14, Math.floor(count / 4)) }, () => ({
         x: Math.random() * this.width,
         y: Math.random() * this.height,
         radius: 0.8 + Math.random() * 1.8,
@@ -381,6 +404,8 @@
       this.inRun = true;
       this.gameOverHandled = false;
       this.elapsed = 0;
+      this.lastArenaRenderAt = 0;
+      this.lastBackgroundRenderAt = 0;
       this.spawnTimer = 0.65;
       this.hudTimer = 0;
       this.runKills = 0;
@@ -419,6 +444,7 @@
         projectileRadius: CONFIG.player.projectileRadius,
         radius: CONFIG.player.radius,
         invuln: 0,
+        knockbackX: 0, knockbackY: 0,
         exp: 0,
         level: 1,
         pickupRadius: CONFIG.player.pickupRadius,
@@ -527,14 +553,26 @@
       const dt = Math.min(0.05, Math.max(0, (time - this.lastTime) / 1000));
       this.lastTime = time;
 
-      this.drawBackground(time / 1000);
+      if (!global.document || !global.document.hidden) {
+        const backgroundInterval = 1000 / CONFIG.performance.backgroundFps;
+        if (time - this.lastBackgroundRenderAt >= backgroundInterval) {
+          this.drawBackground(time / 1000);
+          this.lastBackgroundRenderAt = time;
+        }
+      }
 
       if (this.active && !this.paused) {
         this.update(dt);
       }
 
-      if (this.inRun) {
-        this.renderArena(this.elapsed);
+      if (this.inRun && (!global.document || !global.document.hidden)) {
+        const mobile = global.matchMedia && global.matchMedia("(pointer: coarse), (max-width: 900px)").matches;
+        const targetFps = mobile ? CONFIG.performance.mobileFps : CONFIG.performance.desktopFps;
+        const frameInterval = 1000 / targetFps;
+        if (time - this.lastArenaRenderAt >= frameInterval) {
+          this.renderArena(this.elapsed);
+          this.lastArenaRenderAt = time;
+        }
       }
 
       this.rafId = requestAnimationFrame((nextTime) => this.loop(nextTime));
@@ -600,8 +638,13 @@
         dy /= length;
       }
 
-      p.vx = dx * p.speed;
-      p.vy = dy * p.speed;
+      const knockbackDecay = Math.exp(-7.5 * dt);
+      p.knockbackX = (p.knockbackX || 0) * knockbackDecay;
+      p.knockbackY = (p.knockbackY || 0) * knockbackDecay;
+      if (Math.abs(p.knockbackX) < 3) p.knockbackX = 0;
+      if (Math.abs(p.knockbackY) < 3) p.knockbackY = 0;
+      p.vx = dx * p.speed + p.knockbackX;
+      p.vy = dy * p.speed + p.knockbackY;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       this.keepPlayerInBounds();
@@ -647,6 +690,7 @@
 
         if (enemy.specialMode === "suicide") {
           if (enemy.fuseTimer >= 0) {
+            // 蓄力期间完全定身；无论是接近玩家还是被击杀触发，统一蓄力 1 秒。
             enemy.fuseTimer = Math.max(0, enemy.fuseTimer - dt);
             enemy.vx = 0;
             enemy.vy = 0;
@@ -655,9 +699,7 @@
           }
           const triggerDistance = p.radius + enemy.radius + 34;
           if (distance <= triggerDistance) {
-            enemy.fuseTimer = 0.6;
-            enemy.vx = 0;
-            enemy.vy = 0;
+            this.startSuicideCharge(enemy);
             continue;
           }
           enemy.vx = dirX * enemy.speed;
@@ -696,7 +738,7 @@
         const collisionDistance = p.radius + enemy.radius;
         if (distance < collisionDistance && enemy.contactCooldown <= 0) {
           enemy.contactCooldown = 0.72;
-          this.damagePlayer(enemy.damage);
+          this.damagePlayer(enemy.damage, enemy.x, enemy.y);
           const push = (collisionDistance - distance + 3) * 0.55;
           enemy.x -= dirX * push;
           enemy.y -= dirY * push;
@@ -762,7 +804,7 @@
         const dy = p.y - shot.y;
         const hitRadius = p.radius + shot.radius;
         if (dx * dx + dy * dy <= hitRadius * hitRadius) {
-          this.damagePlayer(shot.damage);
+          this.damagePlayer(shot.damage, shot.x, shot.y);
           entities.release("enemyProjectile", this.enemyShots.splice(i, 1)[0]);
           continue;
         }
@@ -782,6 +824,7 @@
 
     startNextBoss() {
       if (this.bossActive || !this.bossQueue.length || !this.player) return;
+      const isFirstBossEncounter = !this.bossMusicUnlocked;
       const level = this.bossQueue.shift();
       const entities = global.FantasySurvivor.Entities;
 
@@ -826,6 +869,10 @@
       }
       this.bossActive = true;
       this.bossMusicUnlocked = true;
+      if (isFirstBossEncounter) {
+        const audio = global.FantasySurvivor && global.FantasySurvivor.Audio;
+        if (audio && typeof audio.restartMusicFromBeginning === "function") audio.restartMusicFromBeginning();
+      }
       this.spawnTimer = Math.min(this.spawnTimer, 0.2);
       this.bossAnnouncement = bossCount > 1 ? `BOSS 来袭 · Lv.${level} ×${bossCount}` : `BOSS 来袭 · Lv.${level}`;
       this.bossAnnouncementTimer = 2.4;
@@ -872,7 +919,7 @@
         if (!boss.chargeHit) {
           const hitRadius = boss.radius + p.radius + 3;
           if (this.distancePointToSegmentSquared(p.x, p.y, oldX, oldY, boss.x, boss.y) <= hitRadius * hitRadius) {
-            this.damagePlayer(boss.damage + 5);
+            this.damagePlayer(boss.damage + 5, boss.x, boss.y);
             boss.chargeHit = true;
           }
         }
@@ -902,7 +949,7 @@
       const currentDistance = Math.hypot(p.x - boss.x, p.y - boss.y);
       if (currentDistance < contactDistance && boss.contactCooldown <= 0) {
         boss.contactCooldown = 0.9;
-        this.damagePlayer(boss.damage);
+        this.damagePlayer(boss.damage, boss.x, boss.y);
       }
 
       boss.bossAttackTimer -= dt;
@@ -958,7 +1005,7 @@
           barrier.hitCooldown = Math.max(0, barrier.hitCooldown - dt);
           const distanceSq = this.distancePointToSegmentSquared(p.x, p.y, barrier.x1, barrier.y1, barrier.x2, barrier.y2);
           if (distanceSq <= (p.radius + 9) ** 2 && barrier.hitCooldown <= 0) {
-            this.damagePlayer(1);
+            this.damagePlayer(1, (barrier.x1 + barrier.x2) * 0.5, (barrier.y1 + barrier.y2) * 0.5);
             barrier.hitCooldown = CONFIG.boss.barrierCooldown;
           }
           if (barrier.timer <= 0) this.bossBarriers.splice(i, 1);
@@ -1002,7 +1049,7 @@
       this.applyEnemyCombatModes(false);
       this.spawnBurst(boss.x, boss.y, "#D3B4FF", 64, 230);
       playSfx("bossDefeat");
-      this.spawnDrop(boss.x, boss.y, "exp", Math.max(35, Math.floor(boss.bossLevel * 5)));
+      this.spawnDrop(boss.x, boss.y, "exp", CONFIG.experience.bossReward, CONFIG.experience.bossReward);
       this.awardGold(35 + boss.bossLevel);
       this.spawnChest(boss.x, boss.y);
 
@@ -1550,7 +1597,7 @@
     },
 
     damageEnemy(enemy, amount, showHit) {
-      if (!enemy || enemy.dead) return;
+      if (!enemy || enemy.dead || enemy.suicideCharging) return;
       enemy.hp -= Math.max(0, amount);
       if (showHit) {
         enemy.flash = 0.09;
@@ -1566,11 +1613,20 @@
         return;
       }
       if (enemy.specialMode === "suicide" && !enemy.exploded) {
-        this.triggerSuicideExplosion(enemy);
+        this.startSuicideCharge(enemy);
         return;
       }
       enemy.dead = true;
       this.finalizeEnemyDefeat(enemy);
+    },
+
+    getEnemyExpReward(enemy) {
+      const wave = this.getWave();
+      const base = Math.min(CONFIG.experience.maxEnemyReward,
+        CONFIG.experience.minEnemyReward + Math.floor(Math.max(0, wave - 1) / CONFIG.experience.waveStep));
+      const bonus = enemy && enemy.kind === "elite" ? CONFIG.experience.eliteBonus :
+        (enemy && enemy.kind === "fast" ? CONFIG.experience.fastBonus : 0);
+      return Math.min(CONFIG.experience.maxEnemyReward, base + bonus);
     },
 
     finalizeEnemyDefeat(enemy) {
@@ -1588,12 +1644,21 @@
         }
       }
       this.spawnDrop(enemy.x + (Math.random() - 0.5) * 12,
-        enemy.y + (Math.random() - 0.5) * 12, "exp", enemy.kind === "elite" ? 12 : (enemy.kind === "fast" ? 6 : 5));
+        enemy.y + (Math.random() - 0.5) * 12, "exp", this.getEnemyExpReward(enemy));
       if (Math.random() < CONFIG.drops.goldChance || enemy.kind === "elite") {
         const value = enemy.kind === "elite" ? 8 + Math.floor(Math.random() * 5) : 1 + Math.floor(Math.random() * 3);
         this.awardGold(value);
       }
       this.spawnBurst(enemy.x, enemy.y, enemy.color, enemy.kind === "elite" ? 18 : 9, 80);
+    },
+
+    startSuicideCharge(source) {
+      if (!source || source.dead || source.exploded || source.suicideCharging) return false;
+      source.suicideCharging = true;
+      source.fuseTimer = 1.0;
+      source.vx = 0;
+      source.vy = 0;
+      return true;
     },
 
     triggerSuicideExplosion(source) {
@@ -1611,7 +1676,7 @@
       if (p) {
         const pdx = p.x - source.x;
         const pdy = p.y - source.y;
-        if (pdx * pdx + pdy * pdy <= radiusSq) this.damagePlayer(1);
+        if (pdx * pdx + pdy * pdy <= radiusSq) this.damagePlayer(1, source.x, source.y);
       }
       this.finalizeEnemyDefeat(source);
       // 直接用近距离范围筛选，敌人上限有限；Boss 明确免疫此类爆炸。
@@ -1645,16 +1710,19 @@
       return amount;
     },
 
-    spawnDrop(x, y, kind, value) {
+    spawnDrop(x, y, kind, value, maxReward) {
       // 金币直接计入本局收益并由 HUD 动画反馈，不再生成地面金币实体。
       if (kind === "gold") return this.awardGold(value);
       const entities = global.FantasySurvivor.Entities;
+      const rewardCap = kind === "exp" ? Math.max(1, Number(maxReward) || CONFIG.experience.maxEnemyReward) : Infinity;
+      const safeValue = kind === "exp" ? Math.min(rewardCap, Math.max(0, Number(value) || 0)) : value;
       this.drops.push(entities.acquire("drop", {
         x, y,
         vx: (Math.random() - 0.5) * 30,
         vy: (Math.random() - 0.5) * 30,
         kind,
-        value,
+        value: safeValue,
+        maxReward: rewardCap,
         radius: kind === "gold" ? CONFIG.drops.goldRadius : CONFIG.drops.expRadius,
         life: kind === "gold" ? CONFIG.drops.goldLife : CONFIG.drops.expLife,
         color: kind === "gold" ? "#F0C56A" : "#4FC3F7",
@@ -1702,23 +1770,31 @@
         drop.y += drop.vy * dt;
 
         if (distance < p.radius + drop.radius + 5) {
-          this.addExperience(drop.value);
+          this.addExperience(drop.value, drop.maxReward || CONFIG.experience.maxEnemyReward);
           this.spawnBurst(drop.x, drop.y, drop.color, 5, 35);
           entities.release("drop", this.drops.splice(i, 1)[0]);
         }
       }
     },
 
-    addExperience(amount) {
+    addExperience(amount, maxReward = Infinity) {
       const p = this.player;
-      const gained = Math.max(0, amount * (p.expMultiplier || 1) * (p.globalMultiplier || 1));
+      if (!p) return 0;
+      const rawGain = Number(amount) * (p.expMultiplier || 1) * (p.globalMultiplier || 1);
+      const requestedCap = Number(maxReward);
+      const rewardCap = Number.isFinite(requestedCap) ? Math.max(1, requestedCap) : Infinity;
+      const gained = Number.isFinite(rawGain) ? Math.max(0, Math.min(rewardCap, rawGain)) : 0;
       this.runExperience += gained;
-      p.exp += gained;
-      while (p.exp >= this.expToNextLevel(p.level)) {
-        p.exp -= this.expToNextLevel(p.level);
+      p.exp = Math.max(0, Number(p.exp) || 0) + gained;
+      let safety = 0;
+      while (safety < 100 && p.exp >= this.expToNextLevel(p.level)) {
+        const required = this.expToNextLevel(p.level);
+        if (!Number.isFinite(required) || required <= 0) break;
+        p.exp -= required;
         p.level += 1;
         this.pendingLevelUps += 1;
         this.queueBossForLevel(p.level);
+        safety += 1;
       }
       if (this.pendingLevelUps > 0) playSfx("levelUp");
       else playSfx("expPickup");
@@ -1727,6 +1803,7 @@
         this.pause();
         if (typeof this.callbacks.onLevelUp === "function") this.callbacks.onLevelUp(p.level, this.pendingLevelUps);
       }
+      return gained;
     },
 
     applyUpgrade(card, consumeLevel = true) {
@@ -1751,13 +1828,23 @@
       return Math.min(325, Math.round(20 + 10 * Math.pow(currentLevel - 1, 1.25)));
     },
 
-    damagePlayer(amount) {
+    damagePlayer(amount, sourceX, sourceY) {
       const p = this.player;
       if (!p || p.invuln > 0 || !this.active) return false;
       // 气运反噬的持续期间完全无敌，碰撞、电墙与冲撞都无法扣心。
       if (p.fortuneUnlocked && p.fortuneAuraTimer > 0) return false;
       // 生命值按整颗心计数：每次有效受击固定扣除 1 颗心。
       p.hp = Math.max(0, Math.floor(p.hp) - 1);
+      let pushX = Number.isFinite(sourceX) ? p.x - sourceX : -(p.vx || 0);
+      let pushY = Number.isFinite(sourceY) ? p.y - sourceY : -(p.vy || 0);
+      let pushLength = Math.hypot(pushX, pushY);
+      if (pushLength < 0.001) {
+        const angle = Math.atan2(-(p.vy || 0), -(p.vx || 0)) || 0;
+        pushX = Math.cos(angle); pushY = Math.sin(angle); pushLength = 1;
+      }
+      const impulse = 480;
+      p.knockbackX = Math.max(-620, Math.min(620, (p.knockbackX || 0) + pushX / pushLength * impulse));
+      p.knockbackY = Math.max(-620, Math.min(620, (p.knockbackY || 0) + pushY / pushLength * impulse));
       p.invuln = CONFIG.player.invulnerability;
       p.hitFlash = 0.18;
       if (p.fortuneUnlocked) {
@@ -1968,11 +2055,7 @@
       }
 
       // 固定在屏幕上的地面底色，世界物件则由摄像机变换绘制。
-      const bg = ctx.createRadialGradient(viewW * 0.5, viewH * 0.46, 10, viewW * 0.5, viewH * 0.46, Math.max(viewW, viewH) * 0.86);
-      bg.addColorStop(0, "#1C3B56");
-      bg.addColorStop(0.55, "#10263E");
-      bg.addColorStop(1, "#081525");
-      ctx.fillStyle = bg;
+      ctx.fillStyle = "#10263E";
       ctx.fillRect(0, 0, viewW, viewH);
 
       const visibleLeft = this.cameraX;
@@ -2059,13 +2142,31 @@
         ctx.save();
         ctx.translate(enemy.x, enemy.y);
         const color = enemy.flash > 0 ? "#FFFFFF" : enemy.color;
-        const glow = ctx.createRadialGradient(0, 0, 1, 0, 0, enemy.radius * 2.5);
-        glow.addColorStop(0, color + "88");
-        glow.addColorStop(1, color + "00");
-        ctx.fillStyle = glow;
+        const isChargingBomber = !enemy.isBoss && enemy.specialMode === "suicide" && enemy.fuseTimer >= 0;
+        const fuseProgress = isChargingBomber ? Math.max(0, Math.min(1, 1 - enemy.fuseTimer / 1.0)) : 0;
+        if (isChargingBomber) {
+          const pulse = 1 + Math.sin(this.elapsed * 34) * 0.035;
+          const blastRadius = 112 * pulse;
+          ctx.globalAlpha = 0.10 + fuseProgress * 0.12;
+          ctx.fillStyle = "#FF5D45";
+          ctx.beginPath(); ctx.arc(0, 0, blastRadius, 0, Math.PI * 2); ctx.fill();
+          ctx.globalAlpha = 0.9;
+          ctx.strokeStyle = `rgba(255,${Math.floor(115 - fuseProgress * 45)},65,${0.72 + fuseProgress * 0.25})`;
+          ctx.lineWidth = 2.5 + fuseProgress * 2;
+          ctx.setLineDash([10, 6]);
+          ctx.beginPath(); ctx.arc(0, 0, blastRadius, 0, Math.PI * 2); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 1;
+        }
+        const bodyPulse = isChargingBomber ? 1 + fuseProgress * 0.78 + Math.sin(this.elapsed * 34) * 0.025 : 1;
+        ctx.scale(bodyPulse, bodyPulse);
+        // 普通敌人使用半透明纯色光晕，避免每个实体每帧创建径向渐变。
+        ctx.globalAlpha = 0.18;
+        ctx.fillStyle = color;
         ctx.beginPath();
-        ctx.arc(0, 0, enemy.radius * 2.5, 0, Math.PI * 2);
+        ctx.arc(0, 0, enemy.radius * 2.05, 0, Math.PI * 2);
         ctx.fill();
+        ctx.globalAlpha = 1;
 
         if (enemy.isBoss) {
           // 大体型紫晶守关 Boss：环形护甲、尖角与核心，确保明显区别于小怪。
@@ -2123,11 +2224,10 @@
           ctx.lineWidth = 2;
           ctx.beginPath(); ctx.arc(0, 0, enemy.radius + 4, 0, Math.PI * 2); ctx.stroke();
         }
-        if (!enemy.isBoss && enemy.specialMode === "suicide") {
-          const fuse = enemy.fuseTimer >= 0 ? Math.max(0, enemy.fuseTimer / 0.6) : 1;
-          ctx.strokeStyle = enemy.fuseTimer >= 0 ? `rgba(255,${Math.floor(105 + 100 * fuse)},85,.95)` : "rgba(255,205,105,.78)";
-          ctx.lineWidth = 2.5;
-          ctx.beginPath(); ctx.arc(0, 0, enemy.radius + 5 + (1 - fuse) * 4, 0, Math.PI * 2); ctx.stroke();
+        if (!enemy.isBoss && enemy.specialMode === "suicide" && !isChargingBomber) {
+          ctx.strokeStyle = "rgba(255,205,105,.82)";
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(0, 0, enemy.radius + 5, 0, Math.PI * 2); ctx.stroke();
         }
         if (!enemy.isBoss && (enemy.hp < enemy.maxHp || enemy.kind === "elite" || enemy.kind === "bossElite")) {
           const barWidth = enemy.radius * 2.4;
@@ -2273,40 +2373,87 @@
     drawPlayer(ctx, time) {
       if (!this.player) return;
       const p = this.player;
-      const color = THEME_COLOR;
-      const bob = Math.sin(time * 4) * 1.5;
       const blink = p.invuln > 0 && Math.floor(time * 18) % 2 === 0;
+      const bob = Math.sin(time * 4.2) * 1.35;
+      const step = Math.sin(time * 10) * 1.8;
+      const cloakWave = Math.sin(time * 3.4) * 1.6;
       ctx.save();
       ctx.translate(p.x, p.y + bob);
       ctx.globalAlpha = blink ? 0.48 : 1;
 
-      const aura = ctx.createRadialGradient(0, 0, 2, 0, 0, 48);
-      aura.addColorStop(0, color + "99");
-      aura.addColorStop(1, color + "00");
-      ctx.fillStyle = aura;
-      ctx.beginPath();
-      ctx.arc(0, 0, 48, 0, Math.PI * 2);
-      ctx.fill();
+      // Soft ground shadow and restrained cyan magic circle.
+      ctx.fillStyle = 'rgba(3, 13, 28, 0.38)';
+      ctx.beginPath(); ctx.ellipse(0, 12, 18, 7, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(112, 200, 232, 0.48)';
+      ctx.lineWidth = 1.15;
+      ctx.beginPath(); ctx.ellipse(0, 5, 22, 8, time * 0.42, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = 'rgba(112, 200, 232, 0.13)';
+      ctx.beginPath(); ctx.arc(0, 0, 25, 0, Math.PI * 2); ctx.fill();
 
-      ctx.strokeStyle = color;
-      ctx.globalAlpha *= 0.8;
-      ctx.lineWidth = 1.3;
-      ctx.beginPath();
-      ctx.ellipse(0, 0, 25, 10, time * 0.65, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.globalAlpha = blink ? 0.48 : 1;
+      // Small boots peek out beneath the flowing coat.
+      ctx.fillStyle = '#243D59';
+      ctx.beginPath(); ctx.ellipse(-6, 10 + step * 0.35, 4.2, 6.2, -0.22, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(6, 10 - step * 0.35, 4.2, 6.2, 0.22, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#D8E8ED';
+      ctx.fillRect(-8, 11 + step * 0.35, 4, 1.5);
+      ctx.fillRect(4, 11 - step * 0.35, 4, 1.5);
 
-      const orb = ctx.createRadialGradient(-5, -6, 1, 0, 0, 17);
-      orb.addColorStop(0, "#FFFFFF");
-      orb.addColorStop(0.27, color);
-      orb.addColorStop(1, "#193B57");
-      ctx.fillStyle = orb;
-      ctx.strokeStyle = "rgba(255,255,255,.9)";
-      ctx.lineWidth = 1.2;
+      // Layered midnight-blue mantle, pale inner robe and gold hem.
+      ctx.fillStyle = '#183653';
+      ctx.strokeStyle = '#83D7E9';
+      ctx.lineWidth = 1.35;
       ctx.beginPath();
-      ctx.arc(0, 0, p.radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
+      ctx.moveTo(-8, -5); ctx.quadraticCurveTo(-17, 1, -13 + cloakWave, 12);
+      ctx.quadraticCurveTo(0, 17, 13 - cloakWave, 12);
+      ctx.quadraticCurveTo(17, 1, 8, -5); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#E7F0F1';
+      ctx.beginPath(); ctx.moveTo(-5, -3); ctx.lineTo(0, 12); ctx.lineTo(5, -3);
+      ctx.quadraticCurveTo(0, -7, -5, -3); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#E6C77D'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(-10, 10); ctx.quadraticCurveTo(0, 14, 10, 10); ctx.stroke();
+
+      // Sleeves and hands.
+      ctx.fillStyle = '#DCE9E9';
+      ctx.beginPath(); ctx.ellipse(-11, 1, 4, 6, -0.48, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(11, 1, 4, 6, 0.48, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#E9C9AE';
+      ctx.beginPath(); ctx.arc(-12, 5, 2.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(12, 5, 2.5, 0, Math.PI * 2); ctx.fill();
+
+      // Face, framed by long pearl-silver hair.
+      ctx.fillStyle = '#F0D6C7';
+      ctx.beginPath(); ctx.ellipse(0, -9, 7.1, 8.4, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#B8D5DF';
+      ctx.beginPath();
+      ctx.moveTo(-6, -15); ctx.quadraticCurveTo(-13, -12, -11, 2);
+      ctx.quadraticCurveTo(-10, 10, -6, 12); ctx.lineTo(-5, -3); ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(6, -15); ctx.quadraticCurveTo(13, -11, 11, 3);
+      ctx.quadraticCurveTo(10, 10, 6, 12); ctx.lineTo(5, -3); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#EAF5F4';
+      ctx.beginPath(); ctx.moveTo(-7, -13); ctx.quadraticCurveTo(-2, -21, 6, -15);
+      ctx.quadraticCurveTo(10, -12, 6, -7); ctx.quadraticCurveTo(1, -12, -2, -10);
+      ctx.quadraticCurveTo(-5, -7, -7, -4); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(104, 153, 177, 0.75)'; ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.moveTo(-8, -7); ctx.quadraticCurveTo(-12, 0, -8, 7); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(8, -7); ctx.quadraticCurveTo(12, 0, 8, 7); ctx.stroke();
+
+      // Eyes and a tiny gold hair ornament make the sprite readable at game scale.
+      ctx.fillStyle = '#397C9B';
+      ctx.beginPath(); ctx.ellipse(-3, -8, 1.15, 1.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(3, -8, 1.15, 1.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#F0D28C'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(5, -16); ctx.lineTo(9, -20); ctx.lineTo(12, -16); ctx.stroke();
+      ctx.fillStyle = '#8CE7F1'; ctx.beginPath(); ctx.arc(9, -17, 1.8, 0, Math.PI * 2); ctx.fill();
+
+      // Floating spell focus above the shoulder.
+      ctx.save();
+      ctx.translate(15, -8 + Math.sin(time * 5) * 2);
+      ctx.rotate(time * 0.8);
+      ctx.strokeStyle = 'rgba(157, 236, 246, 0.95)'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(0, -5); ctx.lineTo(4, 0); ctx.lineTo(0, 5); ctx.lineTo(-4, 0); ctx.closePath(); ctx.stroke();
+      ctx.fillStyle = '#DDFBFF'; ctx.beginPath(); ctx.arc(0, 0, 1.8, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
       ctx.restore();
     },
 

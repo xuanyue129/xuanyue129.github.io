@@ -68,14 +68,17 @@ Game.enemyShots[0].x = Game.player.x; Game.enemyShots[0].y = Game.player.y; Game
 Game.updateEnemyProjectiles(0.01);
 assert(Game.player.hp === hpBeforeShot - 1 && Game.enemyShots.length === 0, 'hostile projectile did not remove itself and cost one heart');
 
-// Suicide enemy stops for 0.6 seconds, then explodes. Death by damage triggers the same explosion immediately.
+// Suicide enemy stops for one second, then explodes. Death by damage starts the same one-second fuse.
 Game.player.x = 300; Game.player.y = 200; Game.player.hp = 3; Game.player.invuln = 0;
 const bomber = app.Entities.createEnemy({ id:31, x:200, y:200, kind:'fast', speed:231, baseSpeed:140, radius:10, hp:22, maxHp:22, specialMode:'suicide', fuseTimer:-1, dead:false, color:'#E7B978' });
 const victim = app.Entities.createEnemy({ id:32, x:250, y:200, kind:'normal', speed:55, baseSpeed:55, radius:13, hp:30, maxHp:30, dead:false, color:'#D98E91' });
 const immuneBoss = app.Entities.createEnemy({ id:33, isBoss:true, bossLevel:10, x:270, y:200, radius:46, hp:500, maxHp:500, dead:false, color:'#8D58D8' });
 Game.enemies = [bomber, victim, immuneBoss];
 Game.killEnemy(bomber);
-assert(bomber.dead && victim.dead, 'suicide explosion did not instantly kill nearby normal enemies');
+assert(!bomber.dead && bomber.suicideCharging && bomber.fuseTimer === 1, 'death did not start a one-second suicide charge');
+assert(!victim.dead, 'nearby enemy was hit before the bomber finished charging');
+Game.updateEnemies(1.01, 1);
+assert(bomber.dead && victim.dead, 'suicide explosion did not kill nearby normal enemies after its fuse');
 assert(immuneBoss.hp === 500 && !immuneBoss.dead, 'Boss took damage from a suicide explosion');
 assert(Game.player.hp === 2, 'player inside the suicide explosion radius did not lose exactly one heart');
 
@@ -83,12 +86,12 @@ assert(Game.player.hp === 2, 'player inside the suicide explosion radius did not
 const fuser = app.Entities.createEnemy({ id:41, x:500, y:500, kind:'fast', speed:231, baseSpeed:140, radius:10, hp:22, maxHp:22, specialMode:'suicide', fuseTimer:-1, dead:false, color:'#E7B978' });
 Game.enemies = [fuser]; Game.player.x = 550; Game.player.y = 500; Game.player.invuln = 1; Game.spawnTimer = 99;
 Game.updateEnemies(0.01, 1);
-assert(fuser.fuseTimer === 0.6, 'suicide enemy did not start its 0.6-second fuse at close range');
+assert(fuser.fuseTimer === 1, 'suicide enemy did not start its one-second fuse at close range');
 const fuseX = fuser.x, fuseY = fuser.y;
 Game.updateEnemies(0.2, 1);
-assert(fuser.x === fuseX && fuser.y === fuseY && fuser.fuseTimer < 0.6, 'suicide enemy moved during its fuse');
-Game.updateEnemies(0.41, 1);
-assert(fuser.dead, 'suicide enemy did not explode when its 0.6-second fuse expired');
+assert(fuser.x === fuseX && fuser.y === fuseY && fuser.fuseTimer < 1, 'suicide enemy moved during its fuse');
+Game.updateEnemies(0.81, 1);
+assert(fuser.dead, 'suicide enemy did not explode when its one-second fuse expired');
 
 // Broadphase separates Bosses and small enemies without all-pairs scanning.
 const largeBoss = app.Entities.createEnemy({ id:51, isBoss:true, x:1000, y:1000, radius:46, dead:false });
